@@ -25,8 +25,23 @@ built="$root/target/release/bundle/macos/mint.app"
 
 echo "==> Installing to /Applications"
 pkill -x mint-app 2>/dev/null || true
+# Wait (bounded) for the old app to exit; launching before then hands the
+# arguments to the dying instance and drops --launch-at-login.
+for _ in $(seq 1 50); do
+  pgrep -x mint-app >/dev/null || break
+  sleep 0.2
+done
+if pgrep -x mint-app >/dev/null; then
+  echo "mint-app did not exit within 10 s; quit it from the menu bar and run again." >&2
+  exit 1
+fi
 if [[ -d /Applications/mint.app ]]; then
-  trash /Applications/mint.app
+  # `trash` ships with macOS 14+; the bundle supports 12.
+  if command -v trash >/dev/null; then
+    trash /Applications/mint.app
+  else
+    mv /Applications/mint.app "$HOME/.Trash/mint.app.$(date +%s)"
+  fi
 fi
 ditto "$built" /Applications/mint.app
 codesign --verify --deep --strict /Applications/mint.app

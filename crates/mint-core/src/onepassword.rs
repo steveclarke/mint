@@ -176,10 +176,10 @@ pub fn login_template(login: &NewLogin, password: &str) -> Zeroizing<String> {
 pub fn create_args(login: &NewLogin) -> Vec<String> {
     let mut args: Vec<String> = vec!["item".into(), "create".into(), "--format".into(), "json".into()];
     if let Some(v) = login.vault.as_deref().filter(|v| !v.is_empty()) {
-        args.extend(["--vault".into(), v.into()]);
+        args.push(format!("--vault={v}"));
     }
     if let Some(u) = login.url.as_deref().filter(|u| !u.is_empty()) {
-        args.extend(["--url".into(), u.into()]);
+        args.push(format!("--url={u}"));
     }
     args.push("-".into());
     args
@@ -200,8 +200,10 @@ pub fn create_login(login: &NewLogin, password: &str) -> Result<SavedItem> {
 /// Replaces the password of an existing item.
 pub fn set_password(item: &str, vault: Option<&str>, password: &str) -> Result<SavedItem> {
     let mut get = vec!["item", "get", item, "--format", "json", "--reveal"];
+    let vault_arg;
     if let Some(v) = vault.filter(|v| !v.is_empty()) {
-        get.extend(["--vault", v]);
+        vault_arg = format!("--vault={v}");
+        get.push(&vault_arg);
     }
     let raw = op(&get, None)?;
     let mut doc = parse(&raw)?;

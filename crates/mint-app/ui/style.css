@@ -14,7 +14,6 @@
   --symbol: #b5179e;
   --danger: #d70015;
   --weak: #e8590c;
-  --fair: #e6a700;
   --focus: rgba(11, 155, 116, 0.55);
   --radius: 14px;
   --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
@@ -38,7 +37,6 @@
     --symbol: #f07ad8;
     --danger: #ff6961;
     --weak: #ff9f43;
-    --fair: #ffd426;
     --focus: rgba(52, 211, 160, 0.6);
   }
 }
@@ -97,30 +95,28 @@ html, body {
   letter-spacing: 0.02em;
   word-break: break-all;
   overflow-wrap: anywhere;
-  -webkit-user-select: text;
-  user-select: text;
-  cursor: text;
+  cursor: pointer;
   transition: background 160ms ease;
 }
 .password.words { word-break: normal; font-size: 20px; }
 .password.long { font-size: 17px; }
 .password.huge { font-size: 13px; }
-.password:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+/* The box holds focus whenever the window opens, so a ring there reads as a status. */
 .password .d { color: var(--digit); }
 .password .s { color: var(--symbol); }
 .password.flash { background: var(--accent-soft); }
 .password.error { font: 13px/1.4 var(--sans); color: var(--danger); word-break: normal; }
 
-.meta { display: flex; align-items: center; gap: 8px; min-height: 16px; color: var(--muted); font-size: 12px; }
+.meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-height: 16px; color: var(--muted); font-size: 12px; }
 .strength { display: flex; gap: 3px; }
 .strength i { width: 18px; height: 4px; border-radius: 2px; background: var(--faint); }
 .strength[data-level="1"] i:nth-child(-n+1) { background: var(--danger); }
 .strength[data-level="2"] i:nth-child(-n+2) { background: var(--weak); }
-.strength[data-level="3"] i:nth-child(-n+3) { background: var(--fair); }
+.strength[data-level="3"] i:nth-child(-n+3) { background: var(--accent); }
 .strength[data-level="4"] i:nth-child(-n+4) { background: var(--accent); }
 .strength[data-level="5"] i { background: var(--accent); }
 .bits { flex: none; color: var(--text); font-variant-numeric: tabular-nums; font-weight: 500; white-space: nowrap; }
-.summary { flex: 1; min-width: 0; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.summary { flex: 0 0 100%; min-width: 0; }
 
 /* Controls */
 .controls { display: flex; flex-direction: column; gap: 10px; }

@@ -5,7 +5,7 @@
 
 use std::io::Write as _;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use mint_core::clipboard;
@@ -19,18 +19,25 @@ use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, State, WebviewWindow, WindowEvent};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt as _};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
+use zeroize::Zeroizing;
 
 const WIDTH: f64 = 460.0;
 /// Launch-at-login starts the app with this flag so it stays in the menu bar.
+/// The log restarts when it grows past this many bytes.
+const LOG_CAP: u64 = 256 * 1024;
 const HIDDEN_FLAG: &str = "--hidden";
 
 struct AppState {
     settings: Settings,
-    /// The rule the window used last; "Copy New Password" in the menu uses it too.
-    last_rule: Mutex<Rule>,
-    /// While op runs, losing focus (to 1Password's approval prompt) must not
-    /// hide the window.
-    op_running: AtomicBool,
+    /// The current rule: the single source of truth for the window and the
+    /// menu's "Copy New Password". Starts from `default_preset`.
+    rule: Mutex<Rule>,
+    /// The password the window shows. It never crosses IPC inbound: `copy`
+    /// and `save` read it from here.
+    last_password: Mutex<Option<Zeroizing<String>>>,
+    /// Op calls in flight. While any runs, losing focus (to 1Password's
+    /// approval prompt) must not hide the window.
+    op_running: AtomicUsize,
     /// The registered hotkey, or why it could not be registered.
     hotkey: Mutex<Result<String, String>>,
     /// The menu's "Launch at Login" check, kept in step with the login item.
@@ -89,11 +96,10 @@ struct SaveRequest {
     vault: Option<String>,
     url: Option<String>,
     username: Option<String>,
-    password: String,
 }
 
 /// Appends a line to mint's log (`~/Library/Logs/mint.log` on macOS, next to
-/// the config elsewhere). Never logs secrets.
+/// the config elsewhere). Never logs secrets or item identifiers.
 fn log(line: &str) {
     let path = if cfg!(target_os = "macos") {
         std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join("Library/Logs/mint.log"))
@@ -104,29 +110,32 @@ fn log(line: &str) {
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
+    // Start over once the log passes the cap, so it cannot grow without bound.
+    if std::fs::metadata(&path).is_ok_and(|m| m.len() > LOG_CAP) {
+        let _ = std::fs::remove_file(&path);
+    }
     if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
         let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
         let _ = writeln!(f, "{secs} {line}");
     }
 }
 
-fn generated(rule: &Rule) -> CmdResult<Generated> {
-    let p = rule.generate()?;
-    Ok(Generated {
+fn generated(rule: &Rule, p: mint_core::Password) -> Generated {
+    Generated {
         password: p.value.to_string(),
         length: p.length,
         kind: p.kind,
         classes: p.classes,
         entropy_bits: (p.entropy_bits * 10.0).round() / 10.0,
         summary: rule.summary(),
-    })
+    }
 }
 
 #[tauri::command]
 fn init(state: State<AppState>) -> Init {
     let hotkey = state.hotkey.lock().unwrap().clone();
     Init {
-        rule: state.last_rule.lock().unwrap().clone(),
+        rule: state.rule.lock().unwrap().clone(),
         clear_after: state.settings.clear_after,
         hotkey: hotkey.clone().ok(),
         hotkey_error: hotkey.err(),
@@ -138,8 +147,10 @@ fn init(state: State<AppState>) -> Init {
 
 #[tauri::command]
 fn generate(rule: Rule, state: State<AppState>) -> CmdResult<Generated> {
-    let out = generated(&rule)?;
-    *state.last_rule.lock().unwrap() = rule;
+    let p = rule.generate()?;
+    *state.last_password.lock().unwrap() = Some(Zeroizing::new(p.value.to_string()));
+    let out = generated(&rule, p);
+    *state.rule.lock().unwrap() = rule;
     Ok(out)
 }
 
@@ -165,7 +176,7 @@ fn copy_secret(secret: &str, clear_after: u64) -> CmdResult<Option<u64>> {
     if clear_after == 0 {
         return Ok(None);
     }
-    let secret = zeroize::Zeroizing::new(secret.to_string());
+    let secret = Zeroizing::new(secret.to_string());
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_secs(clear_after));
         let _ = clipboard::clear_if_unchanged(copied, &secret);
@@ -174,9 +185,13 @@ fn copy_secret(secret: &str, clear_after: u64) -> CmdResult<Option<u64>> {
 }
 
 #[tauri::command]
-fn copy(password: String, state: State<AppState>) -> CmdResult<Option<u64>> {
-    let password = zeroize::Zeroizing::new(password);
+fn copy(state: State<AppState>) -> CmdResult<Option<u64>> {
+    let password = state.last_password.lock().unwrap().clone().ok_or_else(no_password)?;
     copy_secret(&password, state.settings.clear_after)
+}
+
+fn no_password() -> CmdError {
+    CmdError { error: "There is no password to use yet.".into(), code: 2, kind: "usage" }
 }
 
 /// Runs an op call off the main thread. 1Password may put up an approval
@@ -187,9 +202,9 @@ async fn with_op<T: Send + 'static>(
     call: impl FnOnce() -> mint_core::Result<T> + Send + 'static,
 ) -> CmdResult<T> {
     let state = app.state::<AppState>();
-    state.op_running.store(true, Ordering::SeqCst);
+    state.op_running.fetch_add(1, Ordering::SeqCst);
     let result = tauri::async_runtime::spawn_blocking(call).await;
-    state.op_running.store(false, Ordering::SeqCst);
+    state.op_running.fetch_sub(1, Ordering::SeqCst);
     if main_window(app).is_some_and(|w| w.is_visible().unwrap_or(false)) {
         let handle = app.clone();
         let _ = app.run_on_main_thread(move || refocus(&handle));
@@ -220,16 +235,36 @@ async fn vaults(app: AppHandle) -> CmdResult<Vec<Vault>> {
     with_op(&app, onepassword::list_vaults).await
 }
 
+/// Creates the login with `create`, except in demo mode, which returns a
+/// made-up item and never calls it.
+fn save_login(
+    demo: bool,
+    login: NewLogin,
+    password: &str,
+    create: impl FnOnce(&NewLogin, &str) -> mint_core::Result<SavedItem>,
+) -> mint_core::Result<SavedItem> {
+    if demo {
+        return Ok(SavedItem {
+            id: "demo".into(),
+            vault_id: "demo".into(),
+            vault: "Personal".into(),
+            title: login.title,
+            link: None,
+            updated: false,
+        });
+    }
+    create(&login, password)
+}
+
 #[tauri::command]
 async fn save(request: SaveRequest, app: AppHandle) -> CmdResult<SavedItem> {
-    let saved = with_op(&app, move || {
-        let password = zeroize::Zeroizing::new(request.password);
-        let login =
-            NewLogin { title: request.title, vault: request.vault, url: request.url, username: request.username };
-        onepassword::create_login(&login, &password)
-    })
-    .await?;
-    log(&format!("saved item {} to vault {}", saved.id, saved.vault));
+    let password = app.state::<AppState>().last_password.lock().unwrap().clone().ok_or_else(no_password)?;
+    let demo = demo().is_some();
+    let login = NewLogin { title: request.title, vault: request.vault, url: request.url, username: request.username };
+    let saved = with_op(&app, move || save_login(demo, login, &password, onepassword::create_login)).await?;
+    if !demo {
+        log("saved an item to 1Password");
+    }
     Ok(saved)
 }
 
@@ -281,7 +316,7 @@ fn hide_window(app: &AppHandle) {
 /// Whether losing focus should hide the window now.
 fn should_hide_on_blur(app: &AppHandle) -> bool {
     let state = app.state::<AppState>();
-    state.settings.hide_on_blur && !state.op_running.load(Ordering::SeqCst)
+    state.settings.hide_on_blur && state.op_running.load(Ordering::SeqCst) == 0
 }
 
 /// Shows the window centered on the screen under the pointer, a third of the
@@ -388,16 +423,36 @@ mod panel {
     }
 }
 
-/// Handles `--toggle` / `--show` from a second launch (and `mint gui`).
-fn handle_args(app: &AppHandle, args: &[String]) {
+/// What a launch (first or second) asks the running app to do.
+#[derive(Debug, PartialEq, Eq)]
+enum LaunchAction {
+    LaunchAtLogin(bool),
+    Toggle,
+    Show,
+    /// `--hidden`: stay in the menu bar.
+    Stay,
+}
+
+fn parse_args(args: &[String]) -> LaunchAction {
     if let Some(i) = args.iter().position(|a| a == "--launch-at-login") {
-        set_launch_at_login(app, args.get(i + 1).is_some_and(|v| v == "on"));
-        return;
+        return LaunchAction::LaunchAtLogin(args.get(i + 1).is_some_and(|v| v == "on"));
     }
     if args.iter().any(|a| a == "--toggle") {
-        toggle_window(app);
-    } else if !args.iter().any(|a| a == HIDDEN_FLAG) {
-        show_window(app, true);
+        LaunchAction::Toggle
+    } else if args.iter().any(|a| a == HIDDEN_FLAG) {
+        LaunchAction::Stay
+    } else {
+        LaunchAction::Show
+    }
+}
+
+/// Handles `--toggle` / `--show` from a second launch (and `mint gui`).
+fn handle_args(app: &AppHandle, args: &[String]) {
+    match parse_args(args) {
+        LaunchAction::LaunchAtLogin(on) => set_launch_at_login(app, on),
+        LaunchAction::Toggle => toggle_window(app),
+        LaunchAction::Show => show_window(app, true),
+        LaunchAction::Stay => {}
     }
 }
 
@@ -481,7 +536,7 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
             "generate" => show_window(app, true),
             "open" => show_window(app, false),
             "copy" => {
-                let rule = app.state::<AppState>().last_rule.lock().unwrap().clone();
+                let rule = app.state::<AppState>().rule.lock().unwrap().clone();
                 copy_from_menu(app, rule);
             }
             "autostart" => {
@@ -544,9 +599,10 @@ fn main() {
         log(&format!("config ignored: {e}"));
     }
     let state = AppState {
-        last_rule: Mutex::new(initial_rule(&settings)),
+        rule: Mutex::new(initial_rule(&settings)),
         settings,
-        op_running: AtomicBool::new(false),
+        last_password: Mutex::new(None),
+        op_running: AtomicUsize::new(0),
         hotkey: Mutex::new(Err("not registered yet".into())),
         login_item: Mutex::new(None),
     };
@@ -613,11 +669,93 @@ fn main() {
             let args: Vec<String> = std::env::args().collect();
             handle_args(&handle, &args);
             if demo().as_deref() == Some("copy") {
-                let rule = handle.state::<AppState>().last_rule.lock().unwrap().clone();
+                let rule = handle.state::<AppState>().rule.lock().unwrap().clone();
                 copy_from_menu(&handle, rule);
             }
             Ok(())
         })
         .run(tauri::generate_context!())
         .expect("mint failed to start");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(list: &[&str]) -> Vec<String> {
+        list.iter().map(|a| a.to_string()).collect()
+    }
+
+    #[test]
+    fn plain_launch_shows_the_window() {
+        assert_eq!(parse_args(&args(&["mint-app"])), LaunchAction::Show);
+    }
+
+    #[test]
+    fn hidden_launch_stays_in_the_menu_bar() {
+        assert_eq!(parse_args(&args(&["mint-app", "--hidden"])), LaunchAction::Stay);
+    }
+
+    #[test]
+    fn toggle_wins_over_hidden() {
+        assert_eq!(parse_args(&args(&["mint-app", "--hidden", "--toggle"])), LaunchAction::Toggle);
+    }
+
+    #[test]
+    fn launch_at_login_reads_on_and_off() {
+        assert_eq!(parse_args(&args(&["mint-app", "--launch-at-login", "on"])), LaunchAction::LaunchAtLogin(true));
+        assert_eq!(parse_args(&args(&["mint-app", "--launch-at-login", "off"])), LaunchAction::LaunchAtLogin(false));
+        assert_eq!(parse_args(&args(&["mint-app", "--launch-at-login"])), LaunchAction::LaunchAtLogin(false));
+    }
+
+    #[test]
+    fn launch_at_login_wins_over_other_flags() {
+        let a = args(&["mint-app", "--toggle", "--launch-at-login", "on"]);
+        assert_eq!(parse_args(&a), LaunchAction::LaunchAtLogin(true));
+    }
+
+    #[test]
+    fn initial_rule_without_a_preset_is_the_default() {
+        assert_eq!(initial_rule(&Settings::default()), Rule::default());
+    }
+
+    #[test]
+    fn initial_rule_follows_default_preset() {
+        let settings = Settings { default_preset: Some("pin6".into()), ..Settings::default() };
+        let rule = initial_rule(&settings);
+        assert_eq!(rule.kind, Kind::Pin);
+        assert_eq!(rule.length, 6);
+    }
+
+    #[test]
+    fn initial_rule_ignores_an_unknown_preset() {
+        let settings = Settings { default_preset: Some("no-such-preset".into()), ..Settings::default() };
+        assert_eq!(initial_rule(&settings), Rule::default());
+    }
+
+    #[test]
+    fn demo_save_never_calls_create() {
+        let login = NewLogin { title: "Example".into(), vault: Some("demo2".into()), ..NewLogin::default() };
+        let item = save_login(true, login, "secret", |_, _| panic!("demo mode reached 1Password")).unwrap();
+        assert_eq!(item.title, "Example");
+        assert!(item.link.is_none());
+    }
+
+    #[test]
+    fn real_save_passes_the_login_and_password_through() {
+        let login = NewLogin { title: "Example".into(), ..NewLogin::default() };
+        let item = save_login(false, login, "secret", |l, p| {
+            assert_eq!((l.title.as_str(), p), ("Example", "secret"));
+            Ok(SavedItem {
+                id: "i".into(),
+                title: l.title.clone(),
+                vault_id: "v".into(),
+                vault: "V".into(),
+                link: None,
+                updated: false,
+            })
+        })
+        .unwrap();
+        assert_eq!(item.id, "i");
+    }
 }

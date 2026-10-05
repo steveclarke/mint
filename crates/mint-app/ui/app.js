@@ -37,7 +37,6 @@ const els = {
   hint: $("#hint"),
 };
 
-const RULE_KEY = "mint.rule";
 const VAULT_KEY = "mint.vault";
 
 let rule = null;
@@ -150,7 +149,6 @@ async function regenerate() {
   } catch (e) {
     renderError(errorText(e));
   }
-  store(RULE_KEY, rule);
   renderControls();
 }
 
@@ -167,7 +165,7 @@ function edit(change) {
 async function copyAndHide() {
   if (!current || busy) return;
   try {
-    await invoke("copy", { password: current.password });
+    await invoke("copy");
     els.password.classList.add("flash");
     setTimeout(() => {
       els.password.classList.remove("flash");
@@ -234,7 +232,6 @@ async function submitSave(event) {
         vault: els.vault.value || null,
         url: els.url.value.trim() || null,
         username: els.username.value.trim() || null,
-        password: current.password,
       },
     });
     store(VAULT_KEY, els.vault.value);
@@ -322,7 +319,7 @@ function bind() {
       e.preventDefault();
       els.preset.focus();
       if (els.preset.showPicker) try { els.preset.showPicker(); } catch (_) { /* not supported */ }
-    } else if (mod && key === "c" && !window.getSelection().toString() && !isEditable(document.activeElement)) {
+    } else if (mod && key === "c" && !isEditable(document.activeElement)) {
       e.preventDefault();
       copyAndHide();
     } else if (e.key === "Escape") {
@@ -340,6 +337,13 @@ function bind() {
       e.preventDefault();
       invoke("hide");
     }
+  });
+  // Every copy outside a field goes through `copy`, which sets the concealed
+  // clipboard flags and clears on a timer; the page never holds text to copy.
+  document.addEventListener("copy", (e) => {
+    if (isEditable(e.target)) return;
+    e.preventDefault();
+    copyAndHide();
   });
   // Stop the webview's own reload and context menu.
   document.addEventListener("contextmenu", (e) => {
@@ -360,7 +364,7 @@ async function start() {
   bind();
   const init = await invoke("init");
   clearAfter = init.clear_after;
-  rule = load(RULE_KEY) || init.rule;
+  rule = init.rule;
   try {
     presets = await invoke("presets_list");
   } catch (e) {
@@ -379,7 +383,6 @@ async function start() {
   if (init.hotkey_error) setStatus(init.hotkey_error, "error");
   if (!clearAfter) els.hint.textContent = keys ? `${keys} toggles` : "";
   demo = Boolean(init.demo);
-  if (demo) rule = init.rule; // demo states start from the default rule, not the stored one
   if (init.demo === "words") rule = { ...rule, kind: "words", words: 5, capitalize: true, word_digit: true, preset: null };
   if (init.demo === "pin") rule = { ...rule, kind: "pin", length: 6, preset: null };
   await regenerate();
