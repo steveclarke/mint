@@ -126,7 +126,8 @@ fn presets_list_includes_builtins_and_user_presets() {
 fn copy_rejects_invalid_stdin_without_echoing_it() {
     use std::io::Write;
     use std::process::Stdio;
-    for input in [vec![], vec![b'x'; 16385], vec![0xff], b"invented\0secret".to_vec()] {
+    for input in [vec![], b"\n".to_vec(), b"\r\n".to_vec(), vec![b'x'; 16385], vec![0xff], b"invented\0secret".to_vec()]
+    {
         let config = std::env::temp_dir().join("mint-copy-invalid");
         let mut child = command(&config)
             .args(["copy", "--json"])

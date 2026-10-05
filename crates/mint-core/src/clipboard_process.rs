@@ -166,43 +166,6 @@ fn run_until(command: &mut Command, input: &[u8], cap: usize, timeout: Duration)
     }
 }
 
-/// Reads stdin with a byte ceiling and a deadline, including pipes that never close.
-pub fn read_stdin(cap: usize) -> io::Result<Zeroizing<Vec<u8>>> {
-    let fd = libc::STDIN_FILENO;
-    let flags = nonblocking(fd)?;
-    struct Restore(i32);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            unsafe {
-                libc::fcntl(libc::STDIN_FILENO, libc::F_SETFL, self.0);
-            }
-        }
-    }
-    let _restore = Restore(flags);
-    let deadline = Instant::now() + DEADLINE;
-    let mut result = Zeroizing::new(Vec::new());
-    loop {
-        let mut chunk = Zeroizing::new([0u8; 4096]);
-        let amount = (cap + 1 - result.len()).min(chunk.len());
-        let n = unsafe { libc::read(fd, chunk.as_mut_ptr().cast(), amount) };
-        if n == 0 {
-            return Ok(result);
-        }
-        if n > 0 {
-            result.extend_from_slice(&chunk[..n as usize]);
-            if result.len() > cap {
-                return Err(io::Error::other("stdin exceeds limit"));
-            }
-        } else {
-            let e = io::Error::last_os_error();
-            if e.kind() != io::ErrorKind::WouldBlock && e.kind() != io::ErrorKind::Interrupted {
-                return Err(e);
-            }
-        }
-        tick(deadline)?;
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

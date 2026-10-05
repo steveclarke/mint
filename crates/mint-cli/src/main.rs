@@ -1,8 +1,7 @@
 //! `mint`: passwords on the command line, and the contract the window and the
 //! Omarchy plugin build on (`--json`, `save`, exit codes).
 
-#[cfg(not(target_os = "linux"))]
-use std::io::Read;
+mod secret_input;
 use std::io::{IsTerminal, Write};
 use std::process::ExitCode;
 
@@ -341,32 +340,17 @@ fn copy_secret(secret: &str, out: &OutArgs, settings: &Settings) -> Result<u64> 
     Ok(delay)
 }
 
-fn read_secret() -> Result<Zeroizing<Vec<u8>>> {
-    #[cfg(target_os = "linux")]
-    {
-        mint_core::clipboard_process::read_stdin(16384)
-            .map_err(|_| Error::Usage("Could not read bounded secret stdin.".into()))
-    }
-    #[cfg(not(target_os = "linux"))]
-    {
-        let mut bytes = Zeroizing::new(Vec::new());
-        std::io::stdin()
-            .take(16385)
-            .read_to_end(&mut bytes)
-            .map_err(|_| Error::Usage("Could not read secret stdin.".into()))?;
-        Ok(bytes)
-    }
+fn read_secret(timeout: std::time::Duration) -> Result<Zeroizing<Vec<u8>>> {
+    secret_input::read_stdin(timeout)
+        .map_err(|_| Error::Usage("Could not read secret stdin within its byte limit and deadline.".into()))
 }
 
 fn copy_stdin(out: &OutArgs, settings: &Settings) -> Result<()> {
     if std::io::stdin().is_terminal() {
         return Err(Error::Usage("Pipe the secret to mint copy on stdin.".into()));
     }
-    let bytes = read_secret()?;
-    if bytes.is_empty() || bytes.len() > 16384 || bytes.contains(&0) {
-        return Err(Error::Usage("Stdin must contain 1 to 16384 UTF-8 bytes without NUL.".into()));
-    }
-    let secret = std::str::from_utf8(&bytes).map_err(|_| Error::Usage("Stdin must contain valid UTF-8.".into()))?;
+    let bytes = read_secret(secret_input::STDIN_DEADLINE)?;
+    let secret = secret_input::copy_value(&bytes)?;
     let delay = copy_secret(secret, out, settings)?;
     if out.json {
         println!("{}", json!({"copied": true, "clears_after": if delay > 0 { Some(delay) } else { None }}));
@@ -432,7 +416,8 @@ fn spawn_clearer(copied: Copied, delay: u64, secret: &str) -> Result<()> {
 }
 
 fn clear_later(after: u64, token: i64) -> Result<()> {
-    let bytes = if CLEARER_NEEDS_SECRET { read_secret()? } else { Zeroizing::new(Vec::new()) };
+    let bytes =
+        if CLEARER_NEEDS_SECRET { read_secret(std::time::Duration::from_secs(5))? } else { Zeroizing::new(Vec::new()) };
     let secret = std::str::from_utf8(&bytes).map_err(|_| Error::Clipboard("Invalid secret stdin.".into()))?;
     if CLEARER_NEEDS_SECRET {
         std::io::stdout()

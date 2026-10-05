@@ -61,7 +61,7 @@ mint presets [--json]
 - `mint save --json`: the object without `password` (included with `--show`), plus `"id"`, `"title"`, `"vault"`, `"vault_id"`, `"link"` (1Password private link, or null) and `"updated"` (true with `--item`). With `--copy`, also `"copied": bool`; a clipboard failure after the item is saved gives `"copied": false`, a warning on stderr and exit 0.
 - `mint save` plain output: the item ID, then the link, one per line, on stdout; a one-line confirmation on stderr.
 - `mint presets --json`: an array of `{"name", "description", "source": "builtin"|"user", "summary"}`.
-- `mint copy` reads 1–16384 UTF-8 bytes from stdin, preserves whitespace, rejects NUL, and uses the shared concealed copy and conditional clear. No secret argument or secret output is accepted. `--json` returns `{"copied":true,"clears_after":45}` (null when clearing is disabled); `--clear-after` and `--no-clear` apply.
+- `mint copy` reads at most 16384 UTF-8 bytes from stdin within one 120-second deadline on every OS, allowing upstream 1Password approval. It removes exactly one trailing LF or CRLF and preserves all other bytes, including whitespace, additional newlines and a lone CR. Empty input after trimming, NUL and invalid UTF-8 are rejected. The byte limit applies before trimming. The shared concealed copy and conditional clear receive the normalized value; the internal clearer handoff preserves exact bytes and uses its separate five-second deadline. No secret argument or secret output is accepted. `--json` returns `{"copied":true,"clears_after":45}` (null when clearing is disabled); `--clear-after` and `--no-clear` apply.
 - Errors (`kind`): `usage` (2), `unsatisfiable` (3), `onepassword` (4), `clipboard` (5).
 
 ### 1Password mechanism (proven against op 2.39)

@@ -60,7 +60,7 @@ mint gui --toggle             # show or hide the window
 mint presets
 ```
 
-- `mint copy` accepts 1–16384 UTF-8 bytes on stdin, preserves whitespace, rejects NUL, and never echoes the secret. `--json` returns `copied` and `clears_after`; `--clear-after` and `--no-clear` use the shared clipboard policy.
+- `mint copy` accepts at most 16384 UTF-8 bytes on stdin and removes exactly one trailing LF or CRLF. All other bytes, including whitespace, additional newlines and a lone CR, remain unchanged. Empty input after this trim, NUL and invalid UTF-8 are rejected; the secret is never echoed. The complete stdin read has a 120-second deadline on every OS, allowing upstream 1Password approval. `--json` returns `copied` and `clears_after`; `--clear-after` and `--no-clear` use the shared clipboard policy.
 - Plain output by default; `--json` for scripts; no prompts
 - `mint save` prints the item ID and a 1Password link, not the password (`--show` adds it)
 - The JSON contract, field by field: [SPEC.md](SPEC.md#json-contract)
