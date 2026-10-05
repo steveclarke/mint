@@ -3,7 +3,7 @@
 pkgname=mint
 pkgver=0.1.0
 pkgrel=1
-_commit=b22bf0eb336d14c3ad21e5e254162892eb578f08
+_commit=7951d8a84d9fea139671df49346a8f0e3f5ef92f
 pkgdesc="Password generator with a CLI, a small window and save to 1Password"
 arch=('x86_64' 'aarch64')
 url="https://github.com/steveclarke/mint"
@@ -13,7 +13,7 @@ optdepends=('1password-cli: save passwords to 1Password')
 makedepends=('cargo' 'git')
 checkdepends=('python')
 source=("$pkgname::git+https://github.com/steveclarke/mint.git#commit=$_commit" "mint.desktop")
-sha256sums=('SKIP' '2c7fac9e6d0c374fb326b0981e0b8a1ac248fefe2dc62b4a25d5701a6882a36e')
+sha256sums=('SKIP' 'a7363e9d1cd4fb0ee92559e50bdc00203f81c8c2f05002129ed51690a14ec8a2')
 
 prepare() {
   cd "$pkgname"
@@ -39,5 +39,6 @@ package() {
   install -Dm755 target/release/mint "$pkgdir/usr/bin/mint"
   install -Dm755 target/release/mint-app "$pkgdir/usr/bin/mint-app"
   install -Dm644 "$srcdir/mint.desktop" "$pkgdir/usr/share/applications/mint.desktop"
+  install -Dm644 crates/mint-app/icons/128x128@2x.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/mint.png"
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }
