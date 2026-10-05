@@ -33,6 +33,8 @@ struct AppState {
     op_running: AtomicBool,
     /// The registered hotkey, or why it could not be registered.
     hotkey: Mutex<Result<String, String>>,
+    /// The menu's "Launch at Login" check, kept in step with the login item.
+    login_item: Mutex<Option<CheckMenuItem<tauri::Wry>>>,
 }
 
 #[derive(Serialize)]
@@ -388,10 +390,28 @@ mod panel {
 
 /// Handles `--toggle` / `--show` from a second launch (and `mint gui`).
 fn handle_args(app: &AppHandle, args: &[String]) {
+    if let Some(i) = args.iter().position(|a| a == "--launch-at-login") {
+        set_launch_at_login(app, args.get(i + 1).is_some_and(|v| v == "on"));
+        return;
+    }
     if args.iter().any(|a| a == "--toggle") {
         toggle_window(app);
     } else if !args.iter().any(|a| a == HIDDEN_FLAG) {
         show_window(app, true);
+    }
+}
+
+/// Turns the login item on or off and logs what the system reports back.
+fn set_launch_at_login(app: &AppHandle, on: bool) {
+    let launcher = app.autolaunch();
+    let result = if on { launcher.enable() } else { launcher.disable() };
+    let now = launcher.is_enabled().unwrap_or(false);
+    log(&format!(
+        "launch at login: requested {on}, now {now}{}",
+        result.err().map(|e| format!(" ({e})")).unwrap_or_default()
+    ));
+    if let Some(item) = app.state::<AppState>().login_item.lock().unwrap().as_ref() {
+        let _ = item.set_checked(now);
     }
 }
 
@@ -451,6 +471,7 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
             &quit,
         ],
     )?;
+    *app.state::<AppState>().login_item.lock().unwrap() = Some(autostart);
     let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/tray.png"))?;
     TrayIconBuilder::with_id("main")
         .icon(icon)
@@ -466,12 +487,8 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
                 copy_from_menu(app, rule);
             }
             "autostart" => {
-                let launcher = app.autolaunch();
-                let want = !launcher.is_enabled().unwrap_or(false);
-                let _ = if want { launcher.enable() } else { launcher.disable() };
-                let now = launcher.is_enabled().unwrap_or(false);
-                log(&format!("launch at login: requested {want}, now {now}"));
-                let _ = autostart.set_checked(now);
+                let want = !app.autolaunch().is_enabled().unwrap_or(false);
+                set_launch_at_login(app, want);
             }
             "quit" => app.exit(0),
             id => {
@@ -533,6 +550,7 @@ fn main() {
         settings,
         op_running: AtomicBool::new(false),
         hotkey: Mutex::new(Err("not registered yet".into())),
+        login_item: Mutex::new(None),
     };
 
     tauri::Builder::default()
@@ -596,6 +614,10 @@ fn main() {
             log(&format!("started, version {}", env!("CARGO_PKG_VERSION")));
             let args: Vec<String> = std::env::args().collect();
             handle_args(&handle, &args);
+            if demo().as_deref() == Some("copy") {
+                let rule = handle.state::<AppState>().last_rule.lock().unwrap().clone();
+                copy_from_menu(&handle, rule);
+            }
             Ok(())
         })
         .run(tauri::generate_context!())
