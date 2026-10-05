@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=mint
+GenericName=Password Generator
+Comment=Generate strong passwords and save them to 1Password
+Exec=mint-app --show
+Icon=mint
+Terminal=false
+Categories=Utility;Security;
+Keywords=password;generator;1password;
+StartupNotify=false

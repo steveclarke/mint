@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/mint-core", "crates/mint-cli"]
+members = ["crates/mint-core", "crates/mint-cli", "crates/mint-app"]
 default-members = ["crates/mint-core", "crates/mint-cli"]
 
 [workspace.package]
@@ -19,3 +19,8 @@ serde_json = "1"
 lto = true
 codegen-units = 1
 strip = true
+
+# Stripping proc-macro dylibs on macOS leaves rustc unable to load them
+# (`can't find crate for ctor_proc_macro`).
+[profile.release.build-override]
+strip = false

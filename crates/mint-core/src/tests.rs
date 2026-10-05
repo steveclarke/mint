@@ -308,6 +308,10 @@ fn password_goes_in_the_template_never_in_argv() {
     };
     assert!(create_args(&login).iter().all(|a| !a.contains(secret)));
     assert_eq!(create_args(&login).last().map(String::as_str), Some("-"));
+    // Values ride in `--flag=value` form so one that starts with `-` stays a value.
+    let odd = NewLogin { title: "t".into(), vault: Some("-x".into()), url: Some("-y".into()), username: None };
+    let args = create_args(&odd);
+    assert!(args.contains(&"--vault=-x".to_string()) && args.contains(&"--url=-y".to_string()));
     let template: serde_json::Value = serde_json::from_str(&login_template(&login, secret)).unwrap();
     assert_eq!(template["fields"][1]["value"], secret);
     assert_eq!(template["fields"][1]["purpose"], "PASSWORD");

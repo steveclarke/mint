@@ -5,6 +5,7 @@
 //! clear_after = 45            # seconds before a copied password is cleared; 0 = never
 //! hide_on_blur = true         # hide the window when it loses focus
 //! default_preset = "moneris"  # rule the window and bare `mint` start from
+//! theme = "system"            # window appearance: system, light or dark
 //! ```
 
 use serde::{Deserialize, Serialize};
@@ -28,6 +29,16 @@ pub struct Settings {
     pub clear_after: u64,
     pub hide_on_blur: bool,
     pub default_preset: Option<String>,
+    pub theme: Theme,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Theme {
+    #[default]
+    System,
+    Light,
+    Dark,
 }
 
 impl Default for Settings {
@@ -37,6 +48,7 @@ impl Default for Settings {
             clear_after: DEFAULT_CLEAR_AFTER,
             hide_on_blur: true,
             default_preset: None,
+            theme: Theme::System,
         }
     }
 }
