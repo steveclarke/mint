@@ -9,9 +9,9 @@ arch=('x86_64' 'aarch64')
 url="https://github.com/steveclarke/mint"
 license=('MIT')
 depends=('gcc-libs' 'glibc' 'wl-clipboard>=2.3' 'webkit2gtk-4.1' 'libappindicator-gtk3')
-optdepends=('1password-cli: save passwords to 1Password'
-            'xclip: clipboard on X11')
+optdepends=('1password-cli: save passwords to 1Password')
 makedepends=('cargo' 'git')
+checkdepends=('python')
 source=("$pkgname::git+https://github.com/steveclarke/mint.git#commit=$_commit" "mint.desktop")
 sha256sums=('SKIP' '2c7fac9e6d0c374fb326b0981e0b8a1ac248fefe2dc62b4a25d5701a6882a36e')
 
@@ -31,7 +31,7 @@ build() {
 check() {
   cd "$pkgname"
   export RUSTUP_TOOLCHAIN=stable
-  cargo test --frozen --release
+  MINT_OP=/usr/bin/false cargo test --frozen --release
 }
 
 package() {

@@ -121,3 +121,46 @@ fn presets_list_includes_builtins_and_user_presets() {
     let out = command(&config).args(["--preset", "bank", "--json"]).output().unwrap();
     assert_eq!(json(&out)["length"], 12);
 }
+
+#[test]
+fn copy_rejects_invalid_stdin_without_echoing_it() {
+    use std::io::Write;
+    use std::process::Stdio;
+    for input in [vec![], vec![b'x'; 16385], vec![0xff], b"invented\0secret".to_vec()] {
+        let config = std::env::temp_dir().join("mint-copy-invalid");
+        let mut child = command(&config)
+            .args(["copy", "--json"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let _ = child.stdin.take().unwrap().write_all(&input);
+        let output = child.wait_with_output().unwrap();
+        assert_eq!(output.status.code(), Some(2));
+        assert!(output.stdout.is_empty());
+        assert!(!String::from_utf8_lossy(&output.stderr).contains("invented"));
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn copy_without_wayland_fails_closed_even_with_hostile_path() {
+    use std::io::Write;
+    use std::process::Stdio;
+    let config = std::env::temp_dir().join("mint-copy-no-wayland");
+    let mut child = command(&config)
+        .args(["copy", "--json"])
+        .env_remove("WAYLAND_DISPLAY")
+        .env("PATH", "/nonexistent")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(b"invented-secret").unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert_eq!(output.status.code(), Some(5));
+    assert!(output.stdout.is_empty());
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("invented-secret"));
+}
