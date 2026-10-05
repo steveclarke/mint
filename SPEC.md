@@ -23,7 +23,7 @@ One password engine with several ways in: a command line, a small window, a glob
 |---|---|---|
 | length | Any positive integer, no 64 cap (sane upper limit 4096). A range `10-16` means "the site allows 10 to 16": mint uses the top of the range. | 24 |
 | classes | `upper`, `lower`, `digits`, `symbols`; each can be switched off | all four |
-| `--require N` | At least N classes must appear. mint satisfies this by using every enabled class and guaranteeing each one appears; it errors if fewer than N classes are enabled. | every enabled class |
+| `--require N` | At least N classes must appear (N is 1 to 4; 0 is a usage error). mint satisfies this by using every enabled class and guaranteeing each one appears; it errors if fewer than N classes are enabled. | every enabled class |
 | `--symbols SET` | The allowed symbol set, for sites that accept only some | `!@#$%^&*-_=+?` (builder confirms a broadly accepted set) |
 | `--no-ambiguous` | Drops `0O1lI|` and similar | off |
 | `--words N` | Memorable passphrase from an embedded EFF large wordlist, with separator and optional capital/digit | off |
@@ -58,7 +58,7 @@ mint presets [--json]
   `classes` lists the classes present in the password; `length` is in characters.
 - `mint --count N --json`: an array of those objects. Any explicit `--count`, including 1, gives an array.
 - `mint --copy --json`: the same object without `password`, plus `"copied": true` and `"clears_after": int|null` (seconds).
-- `mint save --json`: the object without `password` (included with `--show`), plus `"id"`, `"title"`, `"vault"`, `"vault_id"`, `"link"` (1Password private link, or null) and `"updated"` (true with `--item`).
+- `mint save --json`: the object without `password` (included with `--show`), plus `"id"`, `"title"`, `"vault"`, `"vault_id"`, `"link"` (1Password private link, or null) and `"updated"` (true with `--item`). With `--copy`, also `"copied": bool`; a clipboard failure after the item is saved gives `"copied": false`, a warning on stderr and exit 0.
 - `mint save` plain output: the item ID, then the link, one per line, on stdout; a one-line confirmation on stderr.
 - `mint presets --json`: an array of `{"name", "description", "source": "builtin"|"user", "summary"}`.
 - Errors (`kind`): `usage` (2), `unsatisfiable` (3), `onepassword` (4), `clipboard` (5).
@@ -90,7 +90,7 @@ A small Tauri window, native-feeling, light and dark:
 - macOS: write with the `org.nspasteboard.ConcealedType` and `TransientType` markers so clipboard managers skip it.
 - Linux: `wl-copy --sensitive` (wl-clipboard 2.3+), which offers `x-kde-passwordManagerHint`; older wl-copy works without the hint and mint says so. X11 falls back to `xclip`. Confirm that Omarchy's clipboard history (Walker/Elephant) honours it; if not, find what does.
 - Windows: set `ExcludeClipboardContentFromMonitorProcessing` and `CanIncludeInClipboardHistory = 0`.
-- Auto-clear after 45 seconds if the clipboard still holds the password (configurable; off with `--no-clear`). macOS and Windows check the clipboard change counter instead of reading the contents; Linux compares the text. The CLI hands the password to a detached copy of itself over a pipe for the delayed clear.
+- Auto-clear after 45 seconds if the clipboard still holds the password (configurable; off with `--no-clear`). macOS and Windows check the clipboard change counter instead of reading the contents; Linux compares the text. The CLI starts a detached copy of itself for the delayed clear; only on Linux, where it compares contents, does it receive the password, over a pipe.
 
 ## Packaging
 

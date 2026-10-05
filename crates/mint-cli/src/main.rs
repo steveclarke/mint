@@ -348,32 +348,40 @@ fn detach(cmd: &mut std::process::Command) {
     }
 }
 
+/// Whether the clearer must compare contents, and so needs the password.
+/// macOS and Windows compare the clipboard's change counter instead.
+const CLEARER_NEEDS_SECRET: bool = cfg!(all(unix, not(target_os = "macos")));
+
 /// Starts a detached copy of mint that clears the clipboard after `delay`
-/// seconds if it still holds the password. The password goes over a pipe.
+/// seconds if it still holds the password. Where the password is needed
+/// (Linux), it goes over a pipe; elsewhere the clearer never sees it.
 fn spawn_clearer(copied: Copied, delay: u64, secret: &str) -> Result<()> {
     let exe = std::env::current_exe()
         .map_err(|e| Error::Clipboard(format!("Cannot find mint's own path ({e}); use --no-clear.")))?;
     let mut cmd = std::process::Command::new(exe);
     cmd.args(["__clear-clipboard", "--after", &delay.to_string(), "--token", &copied.token.to_string()])
-        .stdin(std::process::Stdio::piped())
+        .stdin(if CLEARER_NEEDS_SECRET { std::process::Stdio::piped() } else { std::process::Stdio::null() })
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
     detach(&mut cmd);
     let mut child = cmd
         .spawn()
         .map_err(|e| Error::Clipboard(format!("Cannot start the clipboard clearer ({e}); use --no-clear.")))?;
-    let mut pipe = child.stdin.take().expect("stdin is piped");
-    pipe.write_all(secret.as_bytes()).map_err(|e| {
-        Error::Clipboard(format!("Cannot hand the password to the clipboard clearer ({e}); use --no-clear."))
-    })?;
+    if let Some(mut pipe) = child.stdin.take() {
+        pipe.write_all(secret.as_bytes()).map_err(|e| {
+            Error::Clipboard(format!("Cannot hand the password to the clipboard clearer ({e}); use --no-clear."))
+        })?;
+    }
     Ok(())
 }
 
 fn clear_later(after: u64, token: i64) -> Result<()> {
     let mut secret = Zeroizing::new(String::new());
-    std::io::stdin()
-        .read_to_string(&mut secret)
-        .map_err(|e| Error::Clipboard(format!("No password on stdin ({e}).")))?;
+    if CLEARER_NEEDS_SECRET {
+        std::io::stdin()
+            .read_to_string(&mut secret)
+            .map_err(|e| Error::Clipboard(format!("No password on stdin ({e}).")))?;
+    }
     std::thread::sleep(std::time::Duration::from_secs(after));
     clipboard::clear_if_unchanged(Copied { token, concealed: true }, &secret)?;
     Ok(())
@@ -400,16 +408,22 @@ fn save(args: &SaveArgs, out: &OutArgs, settings: &Settings) -> Result<()> {
             &p.value,
         )?,
     };
-    // The item is saved; a clipboard failure now must not hide that.
-    let copy_result = if out.copy { Some(copy(&p, out, settings)) } else { None };
+    // The item is saved, so a clipboard failure now is a warning, not a failure.
+    let copied = out.copy.then(|| match copy(&p, out, settings) {
+        Ok(_) => true,
+        Err(e) => {
+            eprintln!("mint: warning: the item was saved but not copied: {}", e.message());
+            false
+        }
+    });
     if out.json {
         let mut v = password_json(&p, &rule, args.show);
         let saved = serde_json::to_value(&item).expect("SavedItem serializes");
         if let (Some(obj), Value::Object(saved)) = (v.as_object_mut(), saved) {
             obj.extend(saved);
         }
-        if out.copy {
-            v["copied"] = Value::Bool(matches!(copy_result, Some(Ok(_))));
+        if let Some(copied) = copied {
+            v["copied"] = Value::Bool(copied);
         }
         let text = Zeroizing::new(v.to_string());
         println!("{}", text.as_str());
@@ -424,10 +438,7 @@ fn save(args: &SaveArgs, out: &OutArgs, settings: &Settings) -> Result<()> {
             println!("{}", p.value.as_str());
         }
     }
-    match copy_result {
-        Some(Err(e)) => Err(e),
-        _ => Ok(()),
-    }
+    Ok(())
 }
 
 fn list_presets(json: bool) -> Result<()> {

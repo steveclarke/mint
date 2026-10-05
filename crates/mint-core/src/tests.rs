@@ -36,6 +36,87 @@ fn sampler_is_uniform_for_awkward_ranges() {
 }
 
 #[test]
+fn sampler_handles_one_and_powers_of_two() {
+    let mut rng = SecureRng::new();
+    for _ in 0..1000 {
+        assert_eq!(rng.below(1), 0);
+    }
+    // Powers of two take the mask path with no rejections.
+    for n in [2usize, 4, 16, 64, 256] {
+        let per_bin = 4000;
+        let mut counts = vec![0u64; n];
+        for _ in 0..n * per_bin {
+            counts[rng.below(n)] += 1;
+        }
+        let stat = chi_square(&counts, per_bin as f64);
+        let crit = chi_square_critical((n - 1) as f64);
+        assert!(stat < crit, "n={n}: chi-square {stat:.1} exceeds {crit:.1}");
+    }
+    let big = 1usize << 31;
+    for _ in 0..1000 {
+        assert!(rng.below(big) < big);
+    }
+}
+
+#[test]
+fn shuffle_puts_each_element_in_each_position_uniformly() {
+    // A 6x6 element-by-position table: every cell should hold 1/6 of rounds.
+    const N: usize = 6;
+    let rounds = 60_000;
+    let mut rng = SecureRng::new();
+    let mut table = [[0u64; N]; N];
+    for _ in 0..rounds {
+        let mut v: [usize; N] = [0, 1, 2, 3, 4, 5];
+        rng.shuffle(&mut v);
+        for (pos, &el) in v.iter().enumerate() {
+            table[el][pos] += 1;
+        }
+    }
+    let expected = rounds as f64 / N as f64;
+    for (el, row) in table.iter().enumerate() {
+        let stat = chi_square(row, expected);
+        assert!(stat < chi_square_critical((N - 1) as f64), "element {el}: chi-square {stat:.1}");
+    }
+}
+
+#[test]
+fn guaranteed_characters_land_in_every_position() {
+    // With one digit guaranteed among 8 letters' worth of positions, the
+    // shuffle must move it around: digits appear at every index.
+    let rule = Rule { upper: false, symbols: false, length: 8, ..Rule::default() };
+    let mut seen = [false; 8];
+    for _ in 0..2000 {
+        let p = rule.generate().unwrap();
+        for (i, c) in p.value.chars().enumerate() {
+            seen[i] |= c.is_ascii_digit();
+        }
+    }
+    assert!(seen.iter().all(|&s| s), "{seen:?}");
+}
+
+#[test]
+fn password_debug_redacts_the_value() {
+    let p = Rule::default().generate().unwrap();
+    let shown = format!("{p:?}");
+    assert!(!shown.contains(p.value.as_str()), "{shown}");
+    assert!(shown.contains("[redacted]"));
+}
+
+#[test]
+fn require_zero_is_a_usage_error() {
+    assert_eq!(Rule { require: Some(0), ..Rule::default() }.generate().unwrap_err().exit_code(), 2);
+}
+
+#[test]
+fn unit_tests_cannot_reach_the_real_op() {
+    if std::env::var("MINT_TEST_REAL_OP").as_deref() == Ok("1") {
+        return;
+    }
+    let err = crate::onepassword::list_vaults().unwrap_err();
+    assert!(err.message().contains("MINT_TEST_REAL_OP"), "{}", err.message());
+}
+
+#[test]
 fn generated_characters_are_uniform() {
     // One class, so the guaranteed character comes from the same pool and
     // every position should be uniform over a-z.

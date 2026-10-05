@@ -69,6 +69,10 @@ pub fn find_op() -> Option<PathBuf> {
 
 /// Runs `op` with `args`, writing `stdin` to it if given. Returns stdout.
 fn op(args: &[&str], stdin: Option<&[u8]>) -> Result<Zeroizing<String>> {
+    // Unit tests never reach the real account unless MINT_TEST_REAL_OP=1.
+    if cfg!(test) && std::env::var("MINT_TEST_REAL_OP").as_deref() != Ok("1") {
+        return Err(Error::OnePassword("Tests do not call the real op; set MINT_TEST_REAL_OP=1 to allow it.".into()));
+    }
     let bin = find_op().ok_or_else(|| {
         Error::OnePassword(
             "The 1Password CLI (op) is not installed; install it from https://developer.1password.com/docs/cli/get-started and turn on CLI integration in the 1Password app.".into(),

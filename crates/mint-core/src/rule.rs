@@ -166,8 +166,7 @@ impl LengthSpec {
     }
 }
 
-/// A generated password plus what is known about it.
-#[derive(Debug)]
+/// A generated password plus what is known about it. `Debug` redacts the value.
 pub struct Password {
     pub value: Zeroizing<String>,
     pub kind: Kind,
@@ -177,6 +176,18 @@ pub struct Password {
     pub classes: Vec<CharClass>,
     /// Conservative estimate of the entropy of the generation process.
     pub entropy_bits: f64,
+}
+
+impl std::fmt::Debug for Password {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Password")
+            .field("value", &"[redacted]")
+            .field("kind", &self.kind)
+            .field("length", &self.length)
+            .field("classes", &self.classes)
+            .field("entropy_bits", &self.entropy_bits)
+            .finish()
+    }
 }
 
 impl Rule {
@@ -250,6 +261,9 @@ impl Rule {
                     ));
                 }
                 if let Some(n) = self.require {
+                    if n == 0 {
+                        return Err(Error::Usage("--require 0 asks for nothing; use 1 to 4, or leave it out.".into()));
+                    }
                     if n > 4 {
                         return Err(Error::Usage(format!(
                             "--require {n} asks for more than the four classes that exist; use 1 to 4."

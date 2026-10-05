@@ -4,14 +4,18 @@ use std::process::{Command, Output};
 
 use serde_json::Value;
 
+/// Every test runs mint with its own config directory and with `MINT_OP`
+/// pointing at a path that does not exist, so no test can reach the real
+/// 1Password account.
+fn command(config: &std::path::Path) -> Command {
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_mint"));
+    cmd.env("XDG_CONFIG_HOME", config).env("APPDATA", config).env("MINT_OP", "/nonexistent/mint-test/op");
+    cmd
+}
+
 fn mint(args: &[&str]) -> Output {
     let config = std::env::temp_dir().join(format!("mint-cli-test-{}", std::process::id()));
-    Command::new(env!("CARGO_BIN_EXE_mint"))
-        .args(args)
-        .env("XDG_CONFIG_HOME", &config)
-        .env("APPDATA", &config)
-        .output()
-        .expect("mint runs")
+    command(&config).args(args).output().expect("mint runs")
 }
 
 fn json(out: &Output) -> Value {
@@ -70,6 +74,7 @@ fn exit_codes_mean_something() {
         (&["--words", "3", "20"], 2),
         (&["3"], 3),
         (&["--no-upper", "--no-lower", "--require", "3"], 3),
+        (&["--require", "0"], 2),
         (&["save"], 2),
     ];
     for (args, code) in cases {
@@ -94,11 +99,7 @@ fn json_errors_are_objects_on_stderr() {
 
 #[test]
 fn missing_op_exits_4() {
-    let out = Command::new(env!("CARGO_BIN_EXE_mint"))
-        .args(["save", "--title", "never created", "--json"])
-        .env("MINT_OP", "/nonexistent/op")
-        .output()
-        .unwrap();
+    let out = mint(&["save", "--title", "never created", "--json"]);
     assert_eq!(out.status.code(), Some(4));
     let v: Value = serde_json::from_slice(&out.stderr).unwrap();
     assert_eq!(v["kind"], "onepassword");
@@ -109,12 +110,7 @@ fn presets_list_includes_builtins_and_user_presets() {
     let config = std::env::temp_dir().join(format!("mint-presets-test-{}", std::process::id()));
     std::fs::create_dir_all(config.join("mint")).unwrap();
     std::fs::write(config.join("mint").join("presets.toml"), "[bank]\nlength = \"8-12\"\nrequire = 2\n").unwrap();
-    let out = Command::new(env!("CARGO_BIN_EXE_mint"))
-        .args(["presets", "--json"])
-        .env("XDG_CONFIG_HOME", &config)
-        .env("APPDATA", &config)
-        .output()
-        .unwrap();
+    let out = command(&config).args(["presets", "--json"]).output().unwrap();
     let v: Value = serde_json::from_slice(&out.stdout).unwrap();
     let names: Vec<&str> = v.as_array().unwrap().iter().map(|p| p["name"].as_str().unwrap()).collect();
     for n in ["moneris", "pin6", "wifi", "bank"] {
@@ -122,11 +118,6 @@ fn presets_list_includes_builtins_and_user_presets() {
     }
     let bank = v.as_array().unwrap().iter().find(|p| p["name"] == "bank").unwrap();
     assert_eq!(bank["source"], "user");
-    let out = Command::new(env!("CARGO_BIN_EXE_mint"))
-        .args(["--preset", "bank", "--json"])
-        .env("XDG_CONFIG_HOME", &config)
-        .env("APPDATA", &config)
-        .output()
-        .unwrap();
+    let out = command(&config).args(["--preset", "bank", "--json"]).output().unwrap();
     assert_eq!(json(&out)["length"], 12);
 }
