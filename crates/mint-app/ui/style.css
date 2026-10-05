@@ -102,6 +102,7 @@ html, body {
   cursor: text;
   transition: background 160ms ease;
 }
+.password.words { word-break: normal; font-size: 20px; }
 .password.long { font-size: 17px; }
 .password.huge { font-size: 13px; }
 .password:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }

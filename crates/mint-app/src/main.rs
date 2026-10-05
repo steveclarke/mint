@@ -77,6 +77,8 @@ struct Init {
     hotkey_error: Option<String>,
     platform: &'static str,
     version: &'static str,
+    /// Debug builds only: `MINT_DEMO` opens a fixed state for screenshots.
+    demo: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -128,6 +130,7 @@ fn init(state: State<AppState>) -> Init {
         hotkey_error: hotkey.err(),
         platform: std::env::consts::OS,
         version: env!("CARGO_PKG_VERSION"),
+        demo: demo(),
     }
 }
 
@@ -201,8 +204,17 @@ fn refocus(app: &AppHandle) {
     }
 }
 
+/// Screenshot mode for debug builds; never present in a release build.
+fn demo() -> Option<String> {
+    if cfg!(debug_assertions) { std::env::var("MINT_DEMO").ok() } else { None }
+}
+
 #[tauri::command]
 async fn vaults(app: AppHandle) -> CmdResult<Vec<Vault>> {
+    if demo().is_some() {
+        let v = |id: &str, name: &str| Vault { id: id.into(), name: name.into() };
+        return Ok(vec![v("demo1", "Personal"), v("demo2", "Shared")]);
+    }
     with_op(&app, onepassword::list_vaults).await
 }
 
@@ -210,7 +222,8 @@ async fn vaults(app: AppHandle) -> CmdResult<Vec<Vault>> {
 async fn save(request: SaveRequest, app: AppHandle) -> CmdResult<SavedItem> {
     let saved = with_op(&app, move || {
         let password = zeroize::Zeroizing::new(request.password);
-        let login = NewLogin { title: request.title, vault: request.vault, url: request.url, username: request.username };
+        let login =
+            NewLogin { title: request.title, vault: request.vault, url: request.url, username: request.username };
         onepassword::create_login(&login, &password)
     })
     .await?;
@@ -231,7 +244,11 @@ fn open_item(link: String) -> CmdResult<()> {
     } else {
         std::process::Command::new("xdg-open").arg(&link).spawn()
     };
-    opener.map(|_| ()).map_err(|e| CmdError { error: format!("Could not open the link ({e})."), code: 2, kind: "usage" })
+    opener.map(|_| ()).map_err(|e| CmdError {
+        error: format!("Could not open the link ({e})."),
+        code: 2,
+        kind: "usage",
+    })
 }
 
 #[tauri::command]
@@ -307,6 +324,7 @@ fn toggle_window(app: &AppHandle) {
 /// the keyboard without activating mint, so it works over any app and gives
 /// focus straight back when it hides.
 #[cfg(target_os = "macos")]
+#[allow(clippy::unused_unit)] // panel_event! requires the explicit `-> ()`
 mod panel {
     use super::{AppHandle, log, main_window, should_hide_on_blur};
     use tauri_nspanel::{CollectionBehavior, ManagerExt, PanelLevel, StyleMask, WebviewWindowExt, tauri_panel};
@@ -348,8 +366,12 @@ mod panel {
 
     pub fn show(app: &AppHandle) {
         if let Ok(panel) = app.get_webview_panel("main") {
-            panel.show_and_make_key();
-            log(&format!("shown, key window: {}", panel.as_panel().isKeyWindow()));
+            // Demo (screenshot) mode shows without taking the keyboard.
+            if super::demo().is_some() {
+                panel.order_front_regardless();
+            } else {
+                panel.show_and_make_key();
+            }
         }
     }
 
@@ -404,7 +426,13 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, "open", "Open Window", true, None::<&str>)?;
     let presets_menu = Submenu::with_id(app, "presets", "Copy From Preset", true)?;
     for p in presets::all().unwrap_or_default() {
-        let item = MenuItem::with_id(app, format!("preset:{}", p.name), format!("{} — {}", p.name, p.description), true, None::<&str>)?;
+        let item = MenuItem::with_id(
+            app,
+            format!("preset:{}", p.name),
+            format!("{} — {}", p.name, p.description),
+            true,
+            None::<&str>,
+        )?;
         presets_menu.append(&item)?;
     }
     let login = app.autolaunch().is_enabled().unwrap_or(false);
@@ -461,9 +489,10 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
 fn register_hotkey(app: &AppHandle) {
     let state = app.state::<AppState>();
     let combo = state.settings.hotkey.clone();
-    let result = app.global_shortcut().register(combo.as_str()).map(|_| combo.clone()).map_err(|e| {
-        format!("Could not register the hotkey {combo} ({e}); set another with `hotkey` in config.toml.")
-    });
+    let result =
+        app.global_shortcut().register(combo.as_str()).map(|_| combo.clone()).map_err(|e| {
+            format!("Could not register the hotkey {combo} ({e}); set another with `hotkey` in config.toml.")
+        });
     match &result {
         Ok(k) => log(&format!("hotkey registered: {k}")),
         Err(e) => log(&format!("hotkey failed: {e}")),

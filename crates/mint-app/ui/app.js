@@ -93,6 +93,7 @@ function renderPassword(text) {
   els.password.classList.remove("error");
   els.password.classList.toggle("long", text.length > 40 && text.length <= 120);
   els.password.classList.toggle("huge", text.length > 120);
+  els.password.classList.toggle("words", rule.kind === "words");
 }
 
 function renderError(message) {
@@ -375,8 +376,16 @@ async function start() {
   els.hint.textContent = keys ? `${keys} toggles · clears in ${clearAfter} s` : `clears in ${clearAfter} s`;
   if (init.hotkey_error) setStatus(init.hotkey_error, "error");
   if (!clearAfter) els.hint.textContent = keys ? `${keys} toggles` : "";
+  if (init.demo === "words") rule = { ...rule, kind: "words", words: 5, capitalize: true, word_digit: true, preset: null };
+  if (init.demo === "pin") rule = { ...rule, kind: "pin", length: 6, preset: null };
   await regenerate();
   els.password.focus();
+  if (init.demo === "save") {
+    openSave();
+    els.title.value = "Example";
+    els.url.value = "https://example.com";
+    els.username.value = "me@example.com";
+  }
 
   await listen("mint://shown", (event) => {
     if (busy) return;
