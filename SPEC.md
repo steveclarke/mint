@@ -82,7 +82,7 @@ A small Tauri window, native-feeling, light and dark:
 ## Hotkey and menu bar
 
 - macOS and Windows: a tray or menu bar icon (Generate, Copy new password, Open window, Presets, Quit), plus a global shortcut that toggles the window, registered by the app. The default is ⌃⌥⌘P on macOS (clear of Spotlight ⌘Space, 1Password ⇧⌘Space, Raycast ⌥Space) and Ctrl+Shift+Alt+P on Windows, set by `hotkey` in `~/.config/mint/config.toml` (`%APPDATA%\mint\config.toml`). Launches at login (opt-in toggle, on for Steve's install).
-- `config.toml` keys: `hotkey`, `clear_after` (seconds, 0 = never), `hide_on_blur`, `default_preset`.
+- `config.toml` keys: `hotkey`, `clear_after` (seconds, 0 = never), `hide_on_blur`, `default_preset`, `theme` (`system`, `light`, `dark`).
 - Linux (Hyprland): no app can register a global key under Wayland, so a compositor bind runs `mint gui --toggle`. The app is single-instance; a second launch toggles the first.
 
 ## Clipboard

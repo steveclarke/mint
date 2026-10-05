@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 36 36">
+  <defs>
+    <mask id="rib">
+      <rect width="36" height="36" fill="#fff"/>
+      <path d="M11.2 24.8 L 24.6 11.4" stroke="#000" stroke-width="2.2" stroke-linecap="round"/>
+    </mask>
+  </defs>
+  <path d="M9.5 26.5 C 8.6 16.4, 15.8 9.8, 27.5 8.5 C 27 19.4, 19.6 26.8, 9.5 26.5 Z" fill="#000" mask="url(#rib)"/>
+  <path d="M9.6 26.4 L 6.6 29.4" stroke="#000" stroke-width="2.6" stroke-linecap="round"/>
+</svg>
