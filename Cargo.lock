@@ -2156,9 +2156,11 @@ name = "mint-cli"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "libc",
  "mint-core",
  "serde",
  "serde_json",
+ "windows-sys 0.61.2",
  "zeroize",
 ]
 
@@ -2167,6 +2169,7 @@ name = "mint-core"
 version = "0.1.0"
 dependencies = [
  "getrandom 0.4.3",
+ "libc",
  "objc2",
  "objc2-app-kit",
  "objc2-foundation",

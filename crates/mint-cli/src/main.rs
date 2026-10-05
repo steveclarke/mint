@@ -1,7 +1,8 @@
 //! `mint`: passwords on the command line, and the contract the window and the
 //! Omarchy plugin build on (`--json`, `save`, exit codes).
 
-use std::io::{IsTerminal, Read, Write};
+mod secret_input;
+use std::io::{IsTerminal, Write};
 use std::process::ExitCode;
 
 use clap::{Args, Parser, Subcommand};
@@ -33,6 +34,8 @@ struct Cli {
 enum Command {
     /// Generate a password and save it to 1Password (new Login, or --item to replace a password).
     Save(Box<SaveArgs>),
+    /// Copy UTF-8 secret bytes from stdin, concealed and conditionally cleared.
+    Copy,
     /// Open mint's window, or show/hide the running one.
     Gui {
         /// Show the window if hidden, hide it if shown.
@@ -188,6 +191,7 @@ fn run(cli: Cli) -> Result<()> {
     match cli.command {
         None => generate(&cli.rule_args, &cli.out, &settings),
         Some(Command::Save(args)) => save(&args, &cli.out, &settings),
+        Some(Command::Copy) => copy_stdin(&cli.out, &settings),
         Some(Command::Presets { json }) => list_presets(json || cli.out.json),
         Some(Command::Gui { toggle }) => gui(toggle),
         Some(Command::ClearClipboard { after, token }) => clear_later(after, token),
@@ -309,11 +313,7 @@ fn generate(args: &GenArgs, out: &OutArgs, settings: &Settings) -> Result<()> {
 
 /// Copies concealed and schedules the clear. Returns the clear delay, if any.
 fn copy(p: &Password, out: &OutArgs, settings: &Settings) -> Result<Option<u64>> {
-    let copied = clipboard::copy_concealed(&p.value)?;
-    let delay = if out.no_clear { 0 } else { out.clear_after.unwrap_or(settings.clear_after) };
-    if delay > 0 {
-        spawn_clearer(copied, delay, &p.value)?;
-    }
+    let delay = copy_secret(&p.value, out, settings)?;
     if !out.json {
         let what = match p.kind {
             Kind::Words => "passphrase",
@@ -322,12 +322,45 @@ fn copy(p: &Password, out: &OutArgs, settings: &Settings) -> Result<Option<u64>>
         };
         let mut msg = format!("Copied a {}-character {what} ({:.0} bits)", p.length, p.entropy_bits);
         msg.push_str(&if delay > 0 { format!("; the clipboard clears in {delay} s.") } else { ".".into() });
-        if !copied.concealed {
-            msg.push_str(" Clipboard history may keep it: install wl-clipboard 2.3 or later to hide it.");
-        }
         eprintln!("{msg}");
     }
     Ok(if delay > 0 { Some(delay) } else { None })
+}
+
+/// The same clipboard path serves generation, save and stdin copies.
+fn copy_secret(secret: &str, out: &OutArgs, settings: &Settings) -> Result<u64> {
+    let copied = clipboard::copy_concealed(secret)?;
+    let delay = if out.no_clear { 0 } else { out.clear_after.unwrap_or(settings.clear_after) };
+    if delay > 0 {
+        if let Err(error) = spawn_clearer(copied, delay, secret) {
+            let _ = clipboard::clear_if_unchanged(copied, secret);
+            return Err(error);
+        }
+    }
+    Ok(delay)
+}
+
+fn read_secret(timeout: std::time::Duration) -> Result<Zeroizing<Vec<u8>>> {
+    secret_input::read_stdin(timeout)
+        .map_err(|_| Error::Usage("Could not read secret stdin within its byte limit and deadline.".into()))
+}
+
+fn copy_stdin(out: &OutArgs, settings: &Settings) -> Result<()> {
+    if std::io::stdin().is_terminal() {
+        return Err(Error::Usage("Pipe the secret to mint copy on stdin.".into()));
+    }
+    let bytes = read_secret(secret_input::STDIN_DEADLINE)?;
+    let secret = secret_input::copy_value(&bytes)?;
+    let delay = copy_secret(secret, out, settings)?;
+    if out.json {
+        println!("{}", json!({"copied": true, "clears_after": if delay > 0 { Some(delay) } else { None }}));
+    } else {
+        eprintln!(
+            "Copied.{}",
+            if delay > 0 { format!(" The clipboard clears in {delay} s if unchanged.") } else { String::new() }
+        );
+    }
+    Ok(())
 }
 
 /// Lets a child outlive this process and the terminal: its own process
@@ -361,12 +394,19 @@ fn spawn_clearer(copied: Copied, delay: u64, secret: &str) -> Result<()> {
     let mut cmd = std::process::Command::new(exe);
     cmd.args(["__clear-clipboard", "--after", &delay.to_string(), "--token", &copied.token.to_string()])
         .stdin(if CLEARER_NEEDS_SECRET { std::process::Stdio::piped() } else { std::process::Stdio::null() })
-        .stdout(std::process::Stdio::null())
+        .stdout(if CLEARER_NEEDS_SECRET { std::process::Stdio::piped() } else { std::process::Stdio::null() })
         .stderr(std::process::Stdio::null());
     detach(&mut cmd);
+    #[allow(unused_mut)]
     let mut child = cmd
         .spawn()
         .map_err(|e| Error::Clipboard(format!("Cannot start the clipboard clearer ({e}); use --no-clear.")))?;
+    #[cfg(target_os = "linux")]
+    {
+        mint_core::clipboard_process::handoff(child, secret.as_bytes())
+            .map_err(|_| Error::Clipboard("Cannot hand the secret to the clipboard clearer.".into()))?;
+    }
+    #[cfg(not(target_os = "linux"))]
     if let Some(mut pipe) = child.stdin.take() {
         pipe.write_all(secret.as_bytes()).map_err(|e| {
             Error::Clipboard(format!("Cannot hand the password to the clipboard clearer ({e}); use --no-clear."))
@@ -376,14 +416,17 @@ fn spawn_clearer(copied: Copied, delay: u64, secret: &str) -> Result<()> {
 }
 
 fn clear_later(after: u64, token: i64) -> Result<()> {
-    let mut secret = Zeroizing::new(String::new());
+    let bytes =
+        if CLEARER_NEEDS_SECRET { read_secret(std::time::Duration::from_secs(5))? } else { Zeroizing::new(Vec::new()) };
+    let secret = std::str::from_utf8(&bytes).map_err(|_| Error::Clipboard("Invalid secret stdin.".into()))?;
     if CLEARER_NEEDS_SECRET {
-        std::io::stdin()
-            .read_to_string(&mut secret)
-            .map_err(|e| Error::Clipboard(format!("No password on stdin ({e}).")))?;
+        std::io::stdout()
+            .write_all(&[1])
+            .and_then(|_| std::io::stdout().flush())
+            .map_err(|_| Error::Clipboard("Cannot confirm clipboard clearer startup.".into()))?;
     }
     std::thread::sleep(std::time::Duration::from_secs(after));
-    clipboard::clear_if_unchanged(Copied { token, concealed: true }, &secret)?;
+    clipboard::clear_if_unchanged(Copied { token, concealed: true }, secret)?;
     Ok(())
 }
 

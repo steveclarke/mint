@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
 
+env:
+  MINT_OP: /nonexistent/mint-test/op
+
 permissions:
   contents: read
 

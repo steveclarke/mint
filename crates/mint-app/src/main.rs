@@ -352,7 +352,9 @@ fn show_window(app: &AppHandle, fresh: bool) {
 fn toggle_window(app: &AppHandle) {
     #[cfg(target_os = "macos")]
     let shown = panel::is_key(app);
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "linux")]
+    let shown = main_window(app).is_some_and(|w| w.is_visible().unwrap_or(false));
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     let shown = main_window(app).is_some_and(|w| w.is_visible().unwrap_or(false) && w.is_focused().unwrap_or(false));
     if shown { hide_window(app) } else { show_window(app, true) }
 }

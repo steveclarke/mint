@@ -1,0 +1,44 @@
+# Maintainer: Steve Clarke
+# Builds mint from a pinned commit. Bump _commit (full SHA) and pkgver together.
+pkgname=mint
+pkgver=0.1.0
+pkgrel=1
+_commit=d4ad02b139b4413700711f847e38b33c83800fb0
+pkgdesc="Password generator with a CLI, a small window and save to 1Password"
+arch=('x86_64' 'aarch64')
+url="https://github.com/steveclarke/mint"
+license=('MIT')
+depends=('coreutils' 'gcc-libs' 'glibc' 'wl-clipboard>=2.3' 'webkit2gtk-4.1' 'libappindicator-gtk3')
+optdepends=('1password-cli: save passwords to 1Password')
+makedepends=('cargo' 'git')
+checkdepends=('python')
+source=("$pkgname::git+https://github.com/steveclarke/mint.git#commit=$_commit" "mint.desktop")
+sha256sums=('SKIP' 'a7363e9d1cd4fb0ee92559e50bdc00203f81c8c2f05002129ed51690a14ec8a2')
+
+prepare() {
+  cd "$pkgname"
+  [[ $(git rev-parse HEAD) == "$_commit" ]] || { echo "checkout is not $_commit" >&2; return 1; }
+  export RUSTUP_TOOLCHAIN=stable
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+  cd "$pkgname"
+  export RUSTUP_TOOLCHAIN=stable CARGO_TARGET_DIR=target
+  cargo build --frozen --release -p mint-cli -p mint-app
+}
+
+check() {
+  cd "$pkgname"
+  export RUSTUP_TOOLCHAIN=stable
+  MINT_OP=/usr/bin/false cargo test --frozen --release
+}
+
+package() {
+  cd "$pkgname"
+  install -Dm755 target/release/mint "$pkgdir/usr/bin/mint"
+  install -Dm755 target/release/mint-app "$pkgdir/usr/bin/mint-app"
+  install -Dm644 "$srcdir/mint.desktop" "$pkgdir/usr/share/applications/mint.desktop"
+  install -Dm644 crates/mint-app/icons/128x128@2x.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/mint.png"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

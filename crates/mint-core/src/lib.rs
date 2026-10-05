@@ -16,3 +16,6 @@ pub use rule::{CharClass, Kind, LengthSpec, Password, Rule};
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(target_os = "linux")]
+pub mod clipboard_process;

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Mint
+Comment=Generate a password
+Exec=mint gui --toggle
+Icon=mint
+Terminal=false
+Categories=Utility;Security;
+StartupWMClass=mint-app

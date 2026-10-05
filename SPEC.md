@@ -61,6 +61,7 @@ mint presets [--json]
 - `mint save --json`: the object without `password` (included with `--show`), plus `"id"`, `"title"`, `"vault"`, `"vault_id"`, `"link"` (1Password private link, or null) and `"updated"` (true with `--item`). With `--copy`, also `"copied": bool`; a clipboard failure after the item is saved gives `"copied": false`, a warning on stderr and exit 0.
 - `mint save` plain output: the item ID, then the link, one per line, on stdout; a one-line confirmation on stderr.
 - `mint presets --json`: an array of `{"name", "description", "source": "builtin"|"user", "summary"}`.
+- `mint copy` reads at most 16384 UTF-8 bytes from stdin within one 120-second deadline on every OS, allowing upstream 1Password approval. It removes exactly one trailing LF or CRLF and preserves all other bytes, including whitespace, additional newlines and a lone CR. Empty input after trimming, NUL and invalid UTF-8 are rejected. The byte limit applies before trimming. The shared concealed copy and conditional clear receive the normalized value; the internal clearer handoff preserves exact bytes and uses its separate five-second deadline. No secret argument or secret output is accepted. `--json` returns `{"copied":true,"clears_after":45}` (null when clearing is disabled); `--clear-after` and `--no-clear` apply.
 - Errors (`kind`): `usage` (2), `unsatisfiable` (3), `onepassword` (4), `clipboard` (5).
 
 ### 1Password mechanism (proven against op 2.39)
@@ -90,8 +91,9 @@ A small Tauri window, native-feeling, light and dark:
 ## Clipboard
 
 - macOS: write with the `org.nspasteboard.ConcealedType` and `TransientType` markers so clipboard managers skip it.
-- Linux: `wl-copy --sensitive` (wl-clipboard 2.3+), which offers `x-kde-passwordManagerHint`; older wl-copy works without the hint and mint says so. X11 falls back to `xclip`. Confirm that Omarchy's clipboard history (Walker/Elephant) honours it; if not, find what does.
+- Linux: `wl-copy --sensitive` (wl-clipboard 2.3+) offers `x-kde-passwordManagerHint`, honoured by Omarchy Quattro clipboard history. Unsupported tools and non-Wayland sessions fail without an unhinted copy.
 - Windows: set `ExcludeClipboardContentFromMonitorProcessing` and `CanIncludeInClipboardHistory = 0`.
+- Linux clipboard tools use `/usr/bin/wl-copy` and `/usr/bin/wl-paste`, five-second I/O deadlines, bounded reads, and owned process-group cleanup on failure. A fixed `/usr/bin/timeout` supervisor receives a parent-death signal and terminates stalled tool descendants even when Mint is killed. The CLI waits for the clearer to acknowledge stdin before reporting a scheduled clear; scheduling failure conditionally removes the unchanged secret.
 - Auto-clear after 45 seconds if the clipboard still holds the password (configurable; off with `--no-clear`). macOS and Windows check the clipboard change counter instead of reading the contents; Linux compares the text. The CLI starts a detached copy of itself for the delayed clear; only on Linux, where it compares contents, does it receive the password, over a pipe.
 
 ## Packaging

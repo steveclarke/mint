@@ -24,8 +24,8 @@ scripts/install-macos.sh --no-login
 
 ### Linux
 
-- `packaging/linux/PKGBUILD` builds `mint` and `mint-app` and installs a desktop file (`makepkg -si` in that directory)
-- Wayland has no global hotkeys for apps: a compositor bind runs `mint gui --toggle`, e.g. Hyprland `bind = SUPER SHIFT, P, exec, mint gui --toggle`
+- `packaging/arch/PKGBUILD` builds `mint` and `mint-app` and installs a desktop file (`makepkg -si` in that directory)
+- Wayland has no global hotkeys for apps: a compositor bind runs `mint gui --toggle`, e.g. Hyprland `bind = SUPER SHIFT, P, exec, mint gui --toggle`; if focus is refused, the bind hides the window again
 - Clipboard: `wl-clipboard` 2.3 or later (for `--sensitive`)
 
 ### Windows
@@ -51,6 +51,7 @@ mint --no-ambiguous           # no 0 O o 1 l I |
 mint --words 5 --capitalize --digit
 mint --pin 6
 mint --count 5                # five, one per line
+mint copy                     # reads the secret from stdin; never a command argument
 mint --copy                   # to the clipboard, hidden from history, cleared after 45 s
 mint --json                   # {"password", "length", "kind", "classes", "entropy_bits", "rule"}
 mint save --title "Moneris" --url https://moneris.com --username me --preset moneris
@@ -59,6 +60,7 @@ mint gui --toggle             # show or hide the window
 mint presets
 ```
 
+- `mint copy` accepts at most 16384 UTF-8 bytes on stdin and removes exactly one trailing LF or CRLF. All other bytes, including whitespace, additional newlines and a lone CR, remain unchanged. Empty input after this trim, NUL and invalid UTF-8 are rejected; the secret is never echoed. The complete stdin read has a 120-second deadline on every OS, allowing upstream 1Password approval. `--json` returns `copied` and `clears_after`; `--clear-after` and `--no-clear` use the shared clipboard policy.
 - Plain output by default; `--json` for scripts; no prompts
 - `mint save` prints the item ID and a 1Password link, not the password (`--show` adds it)
 - The JSON contract, field by field: [SPEC.md](SPEC.md#json-contract)
@@ -151,7 +153,7 @@ The app writes a log of startup, hotkey registration and login-item changes to `
 
 **Clipboard**
 - macOS: `org.nspasteboard.ConcealedType` and `TransientType`, so clipboard managers skip the copy.
-- Linux: `wl-copy --sensitive` (`x-kde-passwordManagerHint`). Older wl-copy works without the hint, and mint says so.
+- Linux: `wl-copy --sensitive` (`x-kde-passwordManagerHint`). Sensitive-copy failures and non-Wayland sessions fail without an unhinted fallback. Quattro clipboard history honours the hint.
 - Windows: `ExcludeClipboardContentFromMonitorProcessing`, `CanIncludeInClipboardHistory = 0`, `CanUploadToCloudClipboard = 0`.
 - Cleared after 45 s only if nothing else has been copied since: macOS and Windows compare the clipboard change counter, without reading it; Linux compares the text.
 

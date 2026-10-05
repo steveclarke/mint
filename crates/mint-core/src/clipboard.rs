@@ -3,7 +3,7 @@
 //! - macOS: the string plus `org.nspasteboard.ConcealedType` and
 //!   `org.nspasteboard.TransientType` markers (nspasteboard.org convention).
 //! - Linux: `wl-copy --sensitive`, which offers `x-kde-passwordManagerHint`
-//!   (wl-clipboard 2.3+); X11 falls back to `xclip` with no hint.
+//!   (wl-clipboard 2.3+); unsupported sessions fail without an unhinted copy.
 //! - Windows: `ExcludeClipboardContentFromMonitorProcessing`, plus
 //!   `CanIncludeInClipboardHistory` and `CanUploadToCloudClipboard` set to 0.
 //!
@@ -19,8 +19,7 @@ pub struct Copied {
     /// macOS `changeCount` or Windows clipboard sequence number after the
     /// write; 0 on Linux, which compares contents instead.
     pub token: i64,
-    /// Whether the concealment hint was set. False only on Linux when the
-    /// installed tool cannot set it.
+    /// Whether the concealment hint was set.
     pub concealed: bool,
 }
 
@@ -159,73 +158,70 @@ mod imp {
     }
 }
 
-#[cfg(all(unix, not(target_os = "macos")))]
+#[cfg(target_os = "linux")]
 mod imp {
     use super::{Copied, failed};
-    use crate::error::Result;
-    use std::io::Write;
-    use std::process::{Command, Stdio};
-
-    fn wayland() -> bool {
-        std::env::var_os("WAYLAND_DISPLAY").is_some_and(|v| !v.is_empty())
-    }
-
-    /// Runs a clipboard tool with `input` on stdin. Its output streams go to
-    /// null: wl-copy and xclip fork a server that keeps them open for as long
-    /// as it owns the clipboard, so capturing them would block.
-    fn pipe_to(program: &str, args: &[&str], input: &[u8]) -> std::io::Result<std::process::ExitStatus> {
-        let mut child = Command::new(program)
-            .args(args)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()?;
-        child.stdin.take().expect("stdin is piped").write_all(input)?;
-        child.wait()
-    }
-
-    fn missing(tool: &str, package: &str) -> crate::error::Error {
-        failed(format!("{tool} is not installed; install {package}"))
-    }
+    use crate::{clipboard_process, error::Result};
+    use std::process::Command;
 
     pub fn copy(secret: &str) -> Result<Copied> {
-        if wayland() {
-            let out = pipe_to("wl-copy", &["--sensitive", "--type", "text/plain"], secret.as_bytes())
-                .map_err(|_| missing("wl-copy", "wl-clipboard"))?;
-            if out.success() {
-                return Ok(Copied { token: 0, concealed: true });
-            }
-            // wl-clipboard older than 2.3 has no --sensitive.
-            let out = pipe_to("wl-copy", &["--type", "text/plain"], secret.as_bytes())
-                .map_err(|_| missing("wl-copy", "wl-clipboard"))?;
-            if out.success() {
-                return Ok(Copied { token: 0, concealed: false });
-            }
-            return Err(failed(format!("wl-copy exited with {out}")));
+        if !std::env::var_os("WAYLAND_DISPLAY").is_some_and(|v| !v.is_empty()) {
+            return Err(failed("concealed copy requires Wayland and wl-clipboard 2.3 or later"));
         }
-        let out = pipe_to("xclip", &["-selection", "clipboard", "-in"], secret.as_bytes())
-            .map_err(|_| missing("xclip", "xclip"))?;
-        if out.success() {
-            Ok(Copied { token: 0, concealed: false })
-        } else {
-            Err(failed(format!("xclip exited with {out}")))
-        }
+        copy_using(secret, &mut Command::new("/usr/bin/wl-copy"))
+    }
+
+    fn copy_using(secret: &str, command: &mut Command) -> Result<Copied> {
+        clipboard_process::run(command.args(["--sensitive", "--type", "text/plain"]), secret.as_bytes(), 0)
+            .map_err(|_| failed("sensitive copy failed; wl-clipboard 2.3 or later is required"))?;
+        Ok(Copied { token: 0, concealed: true })
     }
 
     pub fn clear_if_unchanged(_copied: Copied, secret: &str) -> Result<bool> {
-        let (read, clear): (&[&str], &[&str]) = if wayland() {
-            (&["wl-paste", "--no-newline", "--type", "text/plain"], &["wl-copy", "--clear"])
-        } else {
-            (&["xclip", "-selection", "clipboard", "-out"], &["xclip", "-selection", "clipboard", "-in"])
-        };
-        let current = Command::new(read[0]).args(&read[1..]).stderr(Stdio::null()).output().map_err(failed)?;
-        let mut held = current.stdout;
-        let same = held == secret.as_bytes();
-        zeroize::Zeroize::zeroize(&mut held);
-        if !same {
+        clear_using(secret, &mut Command::new("/usr/bin/wl-paste"), &mut Command::new("/usr/bin/wl-copy"))
+    }
+
+    fn clear_using(secret: &str, read: &mut Command, clear: &mut Command) -> Result<bool> {
+        let current = clipboard_process::run(read.args(["--no-newline", "--type", "text/plain"]), b"", secret.len())
+            .map_err(failed)?;
+        if current.as_slice() != secret.as_bytes() {
             return Ok(false);
         }
-        let out = pipe_to(clear[0], &clear[1..], b"").map_err(failed)?;
-        Ok(out.success())
+        clipboard_process::run(clear.arg("--clear"), b"", 0).map_err(failed)?;
+        Ok(true)
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        fn stub(code: &str) -> Command {
+            let mut command = Command::new("/usr/bin/python3");
+            command.args(["-I", "-S", "-c", code]).env("MINT_OP", "/usr/bin/false");
+            command
+        }
+        #[test]
+        fn copies_only_with_hint_and_stdin() {
+            let mut command = stub(
+                "import sys; assert sys.argv[1:]==['--sensitive','--type','text/plain']; assert sys.stdin.read()==' invented\\n'",
+            );
+            assert!(copy_using(" invented\n", &mut command).unwrap().concealed);
+            assert!(copy_using("invented", &mut stub("import sys; sys.exit(1)")).is_err());
+        }
+        #[test]
+        fn changed_or_oversized_clipboard_is_never_cleared() {
+            assert!(
+                !clear_using("invented", &mut stub("print('changed',end='')"), &mut Command::new("/nonexistent"))
+                    .unwrap()
+            );
+            assert!(
+                clear_using("invented", &mut stub("print('x'*100000,end='')"), &mut Command::new("/nonexistent"))
+                    .is_err()
+            );
+        }
+        #[test]
+        fn unchanged_clipboard_is_cleared() {
+            let mut clear = stub("import sys; assert sys.argv[1:]==['--clear']; assert sys.stdin.read()==''");
+            assert!(clear_using("invented", &mut stub("print('invented',end='')"), &mut clear).unwrap());
+        }
     }
 }
