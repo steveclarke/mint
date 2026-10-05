@@ -85,9 +85,36 @@ pub fn run(command: &mut Command, input: &[u8], cap: usize) -> io::Result<Zeroiz
 }
 
 fn run_until(command: &mut Command, input: &[u8], cap: usize, timeout: Duration) -> io::Result<Zeroizing<Vec<u8>>> {
-    command.process_group(0).stdin(Stdio::piped()).stderr(Stdio::null());
-    command.stdout(if cap == 0 { Stdio::null() } else { Stdio::piped() });
-    let mut owned = Owned(Some(command.spawn()?));
+    // A separate timeout supervisor retains the deadline if Mint is killed.
+    // Parent death sends TERM to timeout, which terminates its tool group and
+    // escalates after one second. Successful clipboard owners may stay alive.
+    let mut supervisor = Command::new("/usr/bin/timeout");
+    supervisor
+        .args(["--kill-after=1", "--", &timeout.as_secs_f64().to_string()])
+        .arg(command.get_program())
+        .args(command.get_args());
+    for (key, value) in command.get_envs() {
+        if let Some(value) = value {
+            supervisor.env(key, value);
+        } else {
+            supervisor.env_remove(key);
+        }
+    }
+    supervisor.process_group(0).stdin(Stdio::piped()).stderr(Stdio::null());
+    supervisor.stdout(if cap == 0 { Stdio::null() } else { Stdio::piped() });
+    let parent = unsafe { libc::getpid() };
+    unsafe {
+        supervisor.pre_exec(move || {
+            if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM) != 0 {
+                return Err(io::Error::last_os_error());
+            }
+            if libc::getppid() != parent {
+                return Err(io::Error::other("clipboard parent exited"));
+            }
+            Ok(())
+        });
+    }
+    let mut owned = Owned(Some(supervisor.spawn()?));
     let deadline = Instant::now() + timeout;
     write_input(owned.0.as_mut().unwrap(), input, deadline)?;
     let mut result = Zeroizing::new(Vec::new());
@@ -126,7 +153,10 @@ fn run_until(command: &mut Command, input: &[u8], cap: usize, timeout: Duration)
         }
         if unsafe { info.si_pid() } != 0 {
             if info.si_code != libc::CLD_EXITED || unsafe { info.si_status() } != 0 {
-                return Err(io::Error::other("clipboard command failed"));
+                return Err(io::Error::new(
+                    if unsafe { info.si_status() } == 124 { io::ErrorKind::TimedOut } else { io::ErrorKind::Other },
+                    "clipboard command failed",
+                ));
             }
             // Successful wl-copy forks its clipboard owner, which must survive.
             let _ = owned.0.take().unwrap().wait()?;
@@ -202,8 +232,9 @@ mod tests {
             ("import os,time; os.close(1); time.sleep(10)", vec![], 32),
         ] {
             let start = Instant::now();
-            let error = run_until(&mut python(code), &input, cap, Duration::from_millis(100)).unwrap_err();
-            assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+            // The independent watchdog can close stdin before the local timer fires.
+            run_until(&mut python(code), &input, cap, Duration::from_millis(100)).unwrap_err();
+            assert!(start.elapsed() >= Duration::from_millis(80));
             assert!(start.elapsed() < Duration::from_secs(2));
         }
     }
@@ -254,6 +285,61 @@ mod tests {
             assert_eq!(unsafe { libc::waitpid(pid, std::ptr::null_mut(), libc::WNOHANG) }, -1);
             assert_eq!(io::Error::last_os_error().raw_os_error(), Some(libc::ECHILD));
         }
+    }
+
+    #[test]
+    #[ignore = "subprocess fixture for parent-death cleanup"]
+    fn parent_death_worker() {
+        let path = std::env::var("MINT_PARENT_DEATH_FIXTURE").expect("fixture path required");
+        let mut command = python(
+            "import os,signal,sys,time; signal.signal(signal.SIGTERM,signal.SIG_IGN); child=os.fork(); open(sys.argv[1], 'x').write(str(os.getpid())+' '+str(child)) if child else None; time.sleep(30)",
+        );
+        command.arg(path);
+        let _ = run(&mut command, b"", 0);
+    }
+
+    #[test]
+    fn killing_mint_stops_clipboard_descendants_even_when_they_ignore_term() {
+        let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let directory = std::env::temp_dir().join(format!("mint-parent-death-{}-{nonce}", std::process::id()));
+        std::fs::create_dir(&directory).unwrap();
+        let path = directory.join("pids");
+        let worker = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "clipboard_process::tests::parent_death_worker", "--ignored"])
+            .env("MINT_PARENT_DEATH_FIXTURE", &path)
+            .env("MINT_OP", "/usr/bin/false")
+            .process_group(0)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let mut worker = Owned(Some(worker));
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let pids = loop {
+            if let Ok(raw) = std::fs::read_to_string(&path) {
+                let ids: Vec<i32> = raw.split_whitespace().filter_map(|p| p.parse().ok()).collect();
+                if ids.len() == 2 {
+                    break ids;
+                }
+            }
+            tick(deadline).unwrap();
+        };
+        // Kill the owning Mint test process, not the tool or timeout supervisor.
+        worker.0.as_mut().unwrap().kill().unwrap();
+        worker.0.take().unwrap().wait().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            let alive = pids.iter().any(|pid| {
+                std::fs::read_to_string(format!("/proc/{pid}/stat"))
+                    .is_ok_and(|s| s.rsplit_once(") ").is_some_and(|(_, tail)| !tail.starts_with('Z')))
+            });
+            if !alive {
+                break;
+            }
+            tick(deadline).expect("clipboard descendants survived parent death");
+        }
+        std::fs::remove_file(path).unwrap();
+        std::fs::remove_dir(directory).unwrap();
     }
 
     #[test]

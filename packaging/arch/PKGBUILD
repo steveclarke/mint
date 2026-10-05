@@ -8,7 +8,7 @@ pkgdesc="Password generator with a CLI, a small window and save to 1Password"
 arch=('x86_64' 'aarch64')
 url="https://github.com/steveclarke/mint"
 license=('MIT')
-depends=('gcc-libs' 'glibc' 'wl-clipboard>=2.3' 'webkit2gtk-4.1' 'libappindicator-gtk3')
+depends=('coreutils' 'gcc-libs' 'glibc' 'wl-clipboard>=2.3' 'webkit2gtk-4.1' 'libappindicator-gtk3')
 optdepends=('1password-cli: save passwords to 1Password')
 makedepends=('cargo' 'git')
 checkdepends=('python')

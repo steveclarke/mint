@@ -93,7 +93,7 @@ A small Tauri window, native-feeling, light and dark:
 - macOS: write with the `org.nspasteboard.ConcealedType` and `TransientType` markers so clipboard managers skip it.
 - Linux: `wl-copy --sensitive` (wl-clipboard 2.3+) offers `x-kde-passwordManagerHint`, honoured by Omarchy Quattro clipboard history. Unsupported tools and non-Wayland sessions fail without an unhinted copy.
 - Windows: set `ExcludeClipboardContentFromMonitorProcessing` and `CanIncludeInClipboardHistory = 0`.
-- Linux clipboard tools use `/usr/bin/wl-copy` and `/usr/bin/wl-paste`, five-second I/O deadlines, bounded reads, and owned process-group cleanup on failure. The CLI waits for the clearer to acknowledge stdin before reporting a scheduled clear; scheduling failure conditionally removes the unchanged secret.
+- Linux clipboard tools use `/usr/bin/wl-copy` and `/usr/bin/wl-paste`, five-second I/O deadlines, bounded reads, and owned process-group cleanup on failure. A fixed `/usr/bin/timeout` supervisor receives a parent-death signal and terminates stalled tool descendants even when Mint is killed. The CLI waits for the clearer to acknowledge stdin before reporting a scheduled clear; scheduling failure conditionally removes the unchanged secret.
 - Auto-clear after 45 seconds if the clipboard still holds the password (configurable; off with `--no-clear`). macOS and Windows check the clipboard change counter instead of reading the contents; Linux compares the text. The CLI starts a detached copy of itself for the delayed clear; only on Linux, where it compares contents, does it receive the password, over a pipe.
 
 ## Packaging
