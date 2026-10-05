@@ -6,8 +6,8 @@
   --panel: rgba(246, 246, 248, 0.78);
   --card: rgba(255, 255, 255, 0.82);
   --field: rgba(255, 255, 255, 0.9);
-  --accent: #0b9b74;
-  --accent-strong: #08805f;
+  --accent: #087a5c;
+  --accent-strong: #066a4f;
   --accent-soft: rgba(11, 155, 116, 0.13);
   --on-accent: #ffffff;
   --digit: #0a63c9;
@@ -142,7 +142,7 @@ html, body {
   font-weight: 500;
   color: var(--muted);
 }
-.segmented button[aria-checked="true"] {
+.segmented button[aria-pressed="true"] {
   background: var(--card);
   color: var(--text);
   box-shadow: 0 0.5px 1.5px rgba(0, 0, 0, 0.18);

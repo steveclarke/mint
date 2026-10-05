@@ -113,7 +113,7 @@ function lengthBounds() {
 }
 
 function renderControls() {
-  for (const b of els.kinds) b.setAttribute("aria-checked", String(b.dataset.kind === rule.kind));
+  for (const b of els.kinds) b.setAttribute("aria-pressed", String(b.dataset.kind === rule.kind));
   const bounds = lengthBounds();
   els.lengthLabel.textContent = bounds.label;
   els.slider.min = bounds.min;
@@ -376,6 +376,7 @@ async function start() {
   els.hint.textContent = keys ? `${keys} toggles · clears in ${clearAfter} s` : `clears in ${clearAfter} s`;
   if (init.hotkey_error) setStatus(init.hotkey_error, "error");
   if (!clearAfter) els.hint.textContent = keys ? `${keys} toggles` : "";
+  if (init.demo) rule = init.rule; // demo states start from the default rule, not the stored one
   if (init.demo === "words") rule = { ...rule, kind: "words", words: 5, capitalize: true, word_digit: true, preset: null };
   if (init.demo === "pin") rule = { ...rule, kind: "pin", length: 6, preset: null };
   await regenerate();

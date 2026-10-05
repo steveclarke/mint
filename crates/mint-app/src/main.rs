@@ -418,26 +418,24 @@ fn set_launch_at_login(app: &AppHandle, on: bool) {
 /// Generates with `rule`, copies it, and flashes a check in the menu bar.
 fn copy_from_menu(app: &AppHandle, rule: Rule) {
     let state = app.state::<AppState>();
-    let result = generated(&rule).and_then(|g| copy_secret(&g.password, state.settings.clear_after));
+    let result =
+        rule.generate().map_err(CmdError::from).and_then(|p| copy_secret(&p.value, state.settings.clear_after));
     let (title, tip) = match result {
         Ok(_) => ("✓", "mint: copied".to_string()),
         Err(e) => ("!", format!("mint: {}", e.error)),
     };
     if let Some(tray) = app.tray_by_id("main") {
-        #[cfg(target_os = "macos")]
         let _ = tray.set_title(Some(title));
         let _ = tray.set_tooltip(Some(&tip));
         let app = app.clone();
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(1600));
             if let Some(tray) = app.tray_by_id("main") {
-                #[cfg(target_os = "macos")]
                 let _ = tray.set_title(None::<&str>);
                 let _ = tray.set_tooltip(Some("mint"));
             }
         });
     }
-    let _ = title;
 }
 
 fn build_tray(app: &AppHandle) -> tauri::Result<()> {
