@@ -82,11 +82,12 @@ mod imp {
     use super::{Copied, failed};
     use crate::error::Result;
     use std::ptr::null_mut;
+    use windows_sys::Win32::Foundation::GlobalFree;
     use windows_sys::Win32::System::DataExchange::{
         CloseClipboard, EmptyClipboard, GetClipboardSequenceNumber, OpenClipboard, RegisterClipboardFormatW,
         SetClipboardData,
     };
-    use windows_sys::Win32::System::Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalFree, GlobalLock, GlobalUnlock};
+    use windows_sys::Win32::System::Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock};
     use windows_sys::Win32::System::Ole::CF_UNICODETEXT;
 
     struct Open;
