@@ -25,6 +25,7 @@ scripts/install-macos.sh --no-login
 ### Linux
 
 - `packaging/arch/PKGBUILD` builds `mint` and `mint-app` and installs a desktop file (`makepkg -si` in that directory)
+- [Arch package verification](packaging/arch/VERIFICATION.md): clean-chroot build, package checks and installed window proof
 - Wayland has no global hotkeys for apps: a compositor bind runs `mint gui --toggle`, e.g. Hyprland `bind = SUPER SHIFT, P, exec, mint gui --toggle`; if focus is refused, the bind hides the window again
 - Clipboard: `wl-clipboard` 2.3 or later (for `--sensitive`)
 

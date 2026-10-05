@@ -2,13 +2,16 @@
 # Builds mint from a pinned commit. Bump _commit (full SHA) and pkgver together.
 pkgname=mint
 pkgver=0.1.0
-pkgrel=1
+pkgrel=2
 _commit=0c4aed5bf5e195b2f08421b012e9d64c358eb414
 pkgdesc="Password generator with a CLI, a small window and save to 1Password"
 arch=('x86_64' 'aarch64')
 url="https://github.com/steveclarke/mint"
 license=('MIT')
-depends=('coreutils' 'gcc-libs' 'glibc' 'wl-clipboard>=2.3' 'webkit2gtk-4.1' 'libappindicator-gtk3')
+depends=('cairo' 'coreutils' 'dbus' 'gdk-pixbuf2' 'glib2' 'glibc' 'gtk3' 'hicolor-icon-theme'
+         'libappindicator-gtk3' 'libgcc' 'libsoup3' 'webkit2gtk-4.1' 'wl-clipboard>=2.3' 'xdg-utils')
+# Release binaries are already stripped by Cargo.
+options=('!debug')
 optdepends=('1password-cli: save passwords to 1Password')
 makedepends=('cargo' 'git')
 checkdepends=('python')
