@@ -49,7 +49,25 @@ mint presets [--json]
 
 - `mint save` generates a password and creates a Login item (or, with `--item`, sets that item's password field) through `op`, piping the secret in, never in argv. It prints the item ID and URL, not the password (`--show` prints it too). The builder proves the exact `op` mechanism (template over stdin, or an alternative) against the real account once, into a throwaway item it deletes afterwards, and records the run in the PR.
 - Exit codes: 0 success; 2 usage error; 3 rule cannot be satisfied; 4 `op` missing, not signed in, or failed; 5 clipboard failed.
-- Errors go to stderr as one sentence that names the next step (`--json` errors are `{"error":..., "code":...}`).
+- Errors go to stderr as one sentence that names the next step (`--json` errors are `{"error":..., "code":..., "kind":...}`, also on stderr; stdout stays empty on failure).
+
+### JSON contract
+
+- `mint --json`: one object.
+  `{"password": str, "length": int, "kind": "chars"|"words"|"pin", "classes": ["upper"|"lower"|"digits"|"symbols", ...], "entropy_bits": float (1 decimal), "rule": {"preset": str|null, "summary": str}}`.
+  `classes` lists the classes present in the password; `length` is in characters.
+- `mint --count N --json`: an array of those objects. Any explicit `--count`, including 1, gives an array.
+- `mint --copy --json`: the same object without `password`, plus `"copied": true` and `"clears_after": int|null` (seconds).
+- `mint save --json`: the object without `password` (included with `--show`), plus `"id"`, `"title"`, `"vault"`, `"vault_id"`, `"link"` (1Password private link, or null) and `"updated"` (true with `--item`).
+- `mint save` plain output: the item ID, then the link, one per line, on stdout; a one-line confirmation on stderr.
+- `mint presets --json`: an array of `{"name", "description", "source": "builtin"|"user", "summary"}`.
+- Errors (`kind`): `usage` (2), `unsatisfiable` (3), `onepassword` (4), `clipboard` (5).
+
+### 1Password mechanism (proven against op 2.39)
+
+- New Login: `op item create --vault V [--url U] --format json -` with the item JSON template (title, username, password) on stdin.
+- Existing item (`--item`): `op item get ID --format json --reveal`, the password field replaced in memory, then `op item edit ID --format json` with that JSON on stdin. Items holding a passkey are refused: op's JSON templates drop passkeys.
+- `op` is found through `MINT_OP`, else `PATH`, else `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`.
 
 ## Window
 
@@ -63,15 +81,16 @@ A small Tauri window, native-feeling, light and dark:
 
 ## Hotkey and menu bar
 
-- macOS and Windows: a tray or menu bar icon (Generate, Copy new password, Open window, Presets, Quit), plus a global shortcut that toggles the window, registered by the app. The default is chosen so it doesn't clash with macOS, 1Password or Raycast, and is configurable. Launches at login (opt-in toggle, on for Steve's install).
+- macOS and Windows: a tray or menu bar icon (Generate, Copy new password, Open window, Presets, Quit), plus a global shortcut that toggles the window, registered by the app. The default is ⌃⌥⌘P on macOS (clear of Spotlight ⌘Space, 1Password ⇧⌘Space, Raycast ⌥Space) and Ctrl+Shift+Alt+P on Windows, set by `hotkey` in `~/.config/mint/config.toml` (`%APPDATA%\mint\config.toml`). Launches at login (opt-in toggle, on for Steve's install).
+- `config.toml` keys: `hotkey`, `clear_after` (seconds, 0 = never), `hide_on_blur`, `default_preset`.
 - Linux (Hyprland): no app can register a global key under Wayland, so a compositor bind runs `mint gui --toggle`. The app is single-instance; a second launch toggles the first.
 
 ## Clipboard
 
 - macOS: write with the `org.nspasteboard.ConcealedType` and `TransientType` markers so clipboard managers skip it.
-- Linux: `wl-copy` with its sensitive/password-manager hint. Confirm that Omarchy's clipboard history (Walker/Elephant) honours it; if not, find what does.
+- Linux: `wl-copy --sensitive` (wl-clipboard 2.3+), which offers `x-kde-passwordManagerHint`; older wl-copy works without the hint and mint says so. X11 falls back to `xclip`. Confirm that Omarchy's clipboard history (Walker/Elephant) honours it; if not, find what does.
 - Windows: set `ExcludeClipboardContentFromMonitorProcessing` and `CanIncludeInClipboardHistory = 0`.
-- Auto-clear after 45 seconds if the clipboard still holds the password (configurable; off with `--no-clear`).
+- Auto-clear after 45 seconds if the clipboard still holds the password (configurable; off with `--no-clear`). macOS and Windows check the clipboard change counter instead of reading the contents; Linux compares the text. The CLI hands the password to a detached copy of itself over a pipe for the delayed clear.
 
 ## Packaging
 
