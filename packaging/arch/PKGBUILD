@@ -3,7 +3,7 @@
 pkgname=mint
 pkgver=0.1.0
 pkgrel=1
-_commit=6d80c77e3a0a8f430d1f15532eda56b638ee6c4a
+_commit=4d545c888c6c6371ddb4f69f45705ee7381967c2
 pkgdesc="Password generator with a CLI, a small window and save to 1Password"
 arch=('x86_64' 'aarch64')
 url="https://github.com/steveclarke/mint"
