@@ -46,12 +46,14 @@ let presets = [];
 let vaultsLoaded = false;
 let clearAfter = 45;
 let busy = false;
+let demo = false; // debug screenshot mode: nothing is remembered
 let statusTimer = null;
 
 const isMac = navigator.userAgent.includes("Mac");
 const MOD = isMac ? "⌘" : "Ctrl+";
 
 function store(key, value) {
+  if (demo) return;
   try { localStorage.setItem(key, JSON.stringify(value)); } catch (_) { /* storage unavailable */ }
 }
 function load(key) {
@@ -376,7 +378,8 @@ async function start() {
   els.hint.textContent = keys ? `${keys} toggles · clears in ${clearAfter} s` : `clears in ${clearAfter} s`;
   if (init.hotkey_error) setStatus(init.hotkey_error, "error");
   if (!clearAfter) els.hint.textContent = keys ? `${keys} toggles` : "";
-  if (init.demo) rule = init.rule; // demo states start from the default rule, not the stored one
+  demo = Boolean(init.demo);
+  if (demo) rule = init.rule; // demo states start from the default rule, not the stored one
   if (init.demo === "words") rule = { ...rule, kind: "words", words: 5, capitalize: true, word_digit: true, preset: null };
   if (init.demo === "pin") rule = { ...rule, kind: "pin", length: 6, preset: null };
   await regenerate();
