@@ -131,7 +131,7 @@ mod platform {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
+    use std::io::{BufRead, Write};
     use std::process::{Command, Stdio};
 
     #[test]
@@ -163,21 +163,30 @@ mod tests {
         assert_eq!(STDIN_DEADLINE, Duration::from_secs(120));
         for case in ["empty", "exact", "limit", "overflow", "stall", "partial", "approval", "trickle"] {
             let mut child = Command::new(std::env::current_exe().unwrap())
-                .args(["--exact", "secret_input::tests::stdin_worker", "--ignored"])
+                .args(["--exact", "secret_input::tests::stdin_worker", "--ignored", "--nocapture"])
                 .env("MINT_STDIN_TEST_CASE", case)
                 .env("MINT_OP", "/nonexistent/mint-test/op")
                 .stdin(Stdio::piped())
-                .stdout(Stdio::null())
+                .stdout(if case == "approval" { Stdio::piped() } else { Stdio::null() })
                 .spawn()
                 .unwrap();
             let mut pipe = child.stdin.take().unwrap();
+            let mut ready = child.stdout.take().map(io::BufReader::new);
             match case {
                 "exact" => pipe.write_all(b" invented\r\n\n").unwrap(),
                 "limit" => pipe.write_all(&vec![b'x'; LIMIT]).unwrap(),
                 "overflow" => pipe.write_all(&vec![b'x'; LIMIT + 1]).unwrap(),
                 "partial" => pipe.write_all(b"invented").unwrap(),
                 "approval" => {
-                    std::thread::sleep(Duration::from_millis(25));
+                    let reader = ready.as_mut().unwrap();
+                    loop {
+                        let mut line = String::new();
+                        assert!(reader.read_line(&mut line).unwrap() > 0, "reader exited before readiness");
+                        if line.trim() == "MINT_STDIN_READY" {
+                            break;
+                        }
+                    }
+                    std::thread::sleep(Duration::from_millis(40));
                     pipe.write_all(b"invented\n").unwrap();
                 }
                 _ => (),
@@ -224,7 +233,12 @@ mod tests {
         #[cfg(unix)]
         let flags = unsafe { libc::fcntl(0, libc::F_GETFL) };
         let start = Instant::now();
-        let result = read_stdin(Duration::from_millis(100));
+        if case == "approval" {
+            std::io::stdout().write_all(b"\nMINT_STDIN_READY\n").unwrap();
+            std::io::stdout().flush().unwrap();
+        }
+        let timeout = if case == "approval" { Duration::from_millis(500) } else { Duration::from_millis(100) };
+        let result = read_stdin(timeout);
         #[cfg(unix)]
         assert_eq!(unsafe { libc::fcntl(0, libc::F_GETFL) }, flags);
         match case.as_str() {
@@ -232,7 +246,10 @@ mod tests {
             "exact" => assert_eq!(result.unwrap().as_slice(), b" invented\r\n\n"),
             "limit" => assert_eq!(result.unwrap().len(), LIMIT),
             "overflow" => assert!(result.is_err()),
-            "approval" => assert_eq!(result.unwrap().as_slice(), b"invented\n"),
+            "approval" => {
+                assert_eq!(result.unwrap().as_slice(), b"invented\n");
+                assert!(start.elapsed() >= Duration::from_millis(40));
+            }
             "stall" | "partial" | "trickle" => {
                 assert_eq!(result.unwrap_err().kind(), io::ErrorKind::TimedOut);
                 assert!(start.elapsed() >= Duration::from_millis(100));
