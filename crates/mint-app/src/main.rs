@@ -662,6 +662,10 @@ fn main() {
             };
             if let Some(w) = main_window(&handle) {
                 let _ = w.set_theme(theme);
+                // Screenshot mode has to be capturable; release builds never are.
+                if demo().is_some() {
+                    let _ = w.set_content_protected(false);
+                }
             }
             build_tray(&handle)?;
             register_hotkey(&handle);
