@@ -11,7 +11,7 @@
 - Namcap: no recipe findings, no package errors, no implicit-dependency warnings. Four runtime-dependency warnings remain as described below.
 - Installed package: `mint 0.1.0-2`; `mint --version` reports `mint 0.1.0`.
 - Package SHA-256: `80fbccd97726ac912b4bff42bdfc54c177f8850470df6746eea3375a96fffcee`.
-- Pacman ownership and byte comparison pass for both binaries, the desktop file and icon; `pacman -Qk mint` reports no missing files.
+- Pacman ownership and byte comparison pass for both binaries, the desktop file and icon; `pacman -Qk mint-password` reports no missing files.
 - Native Wayland class: `mint-app`, matching the desktop entry's `StartupWMClass`. X11 `WM_CLASS` does not apply to this native Wayland run.
 - Super+Ctrl+M: physical keycodes from a temporary input device exercise five hide/show transitions; each show focuses the same application process. The device is removed after the check.
 
